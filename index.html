@@ -50,7 +50,7 @@
 <body>
 
 <div id="controls">
-    <button onclick="downloadMapImage()">この範囲を保存 (A4/5000想定)</button>
+    <button onclick="downloadMapImage()">この範囲を保存</button>
     <span style="font-size:12px;">※保存時にファイル名が自動で座標になります</span>
 </div>
 
@@ -64,11 +64,10 @@
 <script>
     // 1. 地図の初期化（福井県付近）
     const map = L.map('map', {
-        preferCanvas: true // 画像化のためにCanvasモードを優先
+        preferCanvas: true
     }).setView([36.062, 136.223], 15);
 
     // 2. 地理院地図（空中写真）レイヤー設定
-    // crossOrigin: "anonymous" が重要（これがないと画像保存時にセキュリティエラーになる）
     const photoLayer = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', {
         attribution: '地理院タイル',
         crossOrigin: "anonymous", 
@@ -92,14 +91,15 @@
         hideElementsWithSelectors: [
             ".leaflet-control-container",
             ".leaflet-dont-include-pane",
-            "#controls"
+            "#controls",
+            ".crosshair" // 十字キーも画像には含めない設定
         ],
         mimeType: "image/jpeg"
     };
     const screenshoter = L.simpleMapScreenshoter(snapshotOptions).addTo(map);
 
-    // 4. 保存ボタンの処理
-    async function downloadMapImage() {
+    // 4. 保存ボタンの処理（修正版）
+    function downloadMapImage() {
         // 現在の表示範囲（緯度経度）を取得
         const bounds = map.getBounds();
         const south = bounds.getSouth().toFixed(6);
@@ -107,29 +107,23 @@
         const north = bounds.getNorth().toFixed(6);
         const east = bounds.getEast().toFixed(6);
 
-        // ファイル名を生成 (例: map_36.060717_136.279386_36.066139_136.288754.jpg)
-        // タイトル部分は任意に変更可能です
-        const filename = `map_${south}_${west}_${north}_${east}`;
+        // ファイル名を生成
+        const filename = `map_${south}_${west}_${north}_${east}.jpg`;
 
-        try {
-            // 画像を生成してダウンロード
-            await screenshoter.takeScreen("image", {
-                caption: null
-            }).then(blob => {
+        // 画像生成処理
+        screenshoter.takeScreen('image')
+            .then(image => {
+                // ここを修正：imageはBase64文字列なのでそのままhrefに入れる
                 const link = document.createElement('a');
-                link.download = filename + ".jpg";
-                link.href = URL.createObjectURL(blob);
+                link.download = filename;
+                link.href = image;
                 link.click();
-                URL.revokeObjectURL(link.href);
+            })
+            .catch(e => {
+                console.error(e);
+                alert("画像の保存に失敗しました。\n" + e.toString());
             });
-        } catch (e) {
-            alert("画像の保存に失敗しました。\n" + e);
-        }
     }
-
-    // A4 1:5000 の目安スケール（簡易実装）
-    // PC画面の解像度によりますが、大まかに「幅1.5km程度」を表示するようにズーム調整
-    // 完全に固定するにはウィンドウサイズ制御が必要ですが、今回は「見たまま保存」を優先
 </script>
 
 </body>
