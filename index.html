@@ -17,10 +17,13 @@
             align-items: center;
             z-index: 1000;
             border-bottom: 1px solid #ccc;
+            flex-wrap: wrap; /* スマホでボタンが溢れないように */
         }
         #map { flex-grow: 1; width: 100%; }
+        
+        /* ボタンのデザイン */
         button {
-            padding: 10px 20px;
+            padding: 8px 16px;
             font-size: 16px;
             background-color: #007bff;
             color: white;
@@ -28,8 +31,17 @@
             cursor: pointer;
             border-radius: 4px;
             font-weight: bold;
+            white-space: nowrap;
         }
         button:hover { background-color: #0056b3; }
+
+        /* 都道府県セレクトボックスのデザイン */
+        select {
+            padding: 8px;
+            font-size: 16px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+        }
         
         /* 画面中央の十字キー */
         .crosshair {
@@ -46,7 +58,7 @@
             content: '';
             position: absolute;
             background: red;
-            box-shadow: 0 0 2px white; /* 見やすくするために白枠を追加 */
+            box-shadow: 0 0 2px white;
         }
         .crosshair::before { top: 9px; left: 0; width: 20px; height: 2px; }
         .crosshair::after { top: 0; left: 9px; width: 2px; height: 20px; }
@@ -55,6 +67,56 @@
 <body>
 
 <div id="controls">
+    <select id="prefSelect" onchange="changePref()">
+        <option value="43.064,141.347">北海道</option>
+        <option value="40.824,140.740">青森県</option>
+        <option value="39.703,141.152">岩手県</option>
+        <option value="38.268,140.871">宮城県</option>
+        <option value="39.718,140.102">秋田県</option>
+        <option value="38.255,140.339">山形県</option>
+        <option value="37.750,140.467">福島県</option>
+        <option value="36.341,140.446">茨城県</option>
+        <option value="36.565,139.883">栃木県</option>
+        <option value="36.391,139.060">群馬県</option>
+        <option value="35.857,139.648">埼玉県</option>
+        <option value="35.605,140.123">千葉県</option>
+        <option value="35.689,139.691">東京都</option>
+        <option value="35.447,139.642">神奈川県</option>
+        <option value="37.902,139.023">新潟県</option>
+        <option value="36.695,137.211">富山県</option>
+        <option value="36.594,136.625">石川県</option>
+        <option value="36.065,136.221" selected>福井県</option> 
+        <option value="35.663,138.568">山梨県</option>
+        <option value="36.651,138.181">長野県</option>
+        <option value="35.391,136.722">岐阜県</option>
+        <option value="34.976,138.383">静岡県</option>
+        <option value="35.180,136.906">愛知県</option>
+        <option value="34.730,136.508">三重県</option>
+        <option value="35.021,135.755">滋賀県</option>
+        <option value="35.011,135.768">京都府</option>
+        <option value="34.686,135.520">大阪府</option>
+        <option value="34.691,135.183">兵庫県</option>
+        <option value="34.685,135.832">奈良県</option>
+        <option value="34.226,135.167">和歌山県</option>
+        <option value="35.503,134.238">鳥取県</option>
+        <option value="35.472,133.050">島根県</option>
+        <option value="34.661,133.935">岡山県</option>
+        <option value="34.396,132.459">広島県</option>
+        <option value="34.186,131.470">山口県</option>
+        <option value="34.065,134.559">徳島県</option>
+        <option value="34.340,134.043">香川県</option>
+        <option value="33.841,132.766">愛媛県</option>
+        <option value="33.559,133.531">高知県</option>
+        <option value="33.606,130.418">福岡県</option>
+        <option value="33.249,130.298">佐賀県</option>
+        <option value="32.744,129.873">長崎県</option>
+        <option value="32.789,130.741">熊本県</option>
+        <option value="33.238,131.612">大分県</option>
+        <option value="31.911,131.423">宮崎県</option>
+        <option value="31.560,130.558">鹿児島県</option>
+        <option value="26.212,127.681">沖縄県</option>
+    </select>
+    
     <button onclick="downloadMapImage()">現在表示中の地図を保存</button>
 </div>
 
@@ -65,51 +127,52 @@
 <script src="https://unpkg.com/leaflet-simple-map-screenshoter"></script>
 
 <script>
-    // 1. 地図の初期化（初期位置：福井県）
+    // 1. 地図の初期化（初期位置：福井県庁付近）
     const map = L.map('map', {
         preferCanvas: true
-    }).setView([36.062, 136.223], 15);
+    }).setView([36.065, 136.221], 15);
 
     // ==================================================
-    // 2. 地図データの定義（すべて無料・登録不要のもの）
+    // 2. 地図データの定義
     // ==================================================
     
-    // 共通設定：クロスオリジン（画像保存のために必須）
     const opt = { attribution: '地理院タイル', crossOrigin: "anonymous", maxZoom: 18 };
     const optEsri = { attribution: 'Esri World Imagery', crossOrigin: "anonymous", maxZoom: 18 };
 
-    // A. 地理院地図：空中写真（オルソ画像）
+    // A. 地理院地図：最新空中写真
     const photo = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', opt);
+
+    // ★追加★ A2. 地理院地図：空中写真（1974-1978年頃）
+    const photoOld = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/gazo1/{z}/{x}/{y}.jpg', opt);
 
     // B. 地理院地図：標準地図
     const std = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', opt);
 
-    // C. 地理院地図：淡色地図（文字や線を書き込むのに便利）
+    // C. 地理院地図：淡色地図
     const pale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', opt);
 
-    // D. 地理院地図：傾斜量図（★林業おすすめ！地形が影絵のように見えます）
+    // D. 地理院地図：傾斜量図
     const slope = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/slopemap/{z}/{x}/{y}.png', {
-        ...opt, opacity: 0.7 // 少し透かして表示
+        ...opt, opacity: 0.7 
     });
 
-    // E. 地理院地図：色別標高図（高さで色分け）
+    // E. 地理院地図：色別標高図
     const relief = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/relief/{z}/{x}/{y}.png', {
         ...opt, opacity: 0.6
     });
 
-    // F. Esri World Imagery（Sentinel等の代替：世界中の衛星写真）
-    // ※地理院写真より撮影時期が新しい場合があります
+    // F. Esri World Imagery
     const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', optEsri);
 
-    // 初期表示設定
+    // 初期表示
     photo.addTo(map);
 
-
     // ==================================================
-    // 3. レイヤー切り替えコントロールの追加
+    // 3. レイヤー切り替えコントロール
     // ==================================================
     const baseMaps = {
-        "空中写真（地理院）": photo,
+        "最新空中写真（地理院）": photo,
+        "過去空中写真(1974-78)": photoOld, // ★追加
         "衛星画像（Esri）": esri,
         "標準地図": std,
         "淡色地図": pale,
@@ -118,11 +181,24 @@
     };
 
     L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
-    // collapsed: false にしたので、常にリストが右上に表示されます
 
 
     // ==================================================
-    // 4. 画像保存機能
+    // 4. 都道府県切り替え機能
+    // ==================================================
+    function changePref() {
+        const select = document.getElementById("prefSelect");
+        const val = select.value.split(","); // "lat,lon" を分割
+        const lat = parseFloat(val[0]);
+        const lon = parseFloat(val[1]);
+        
+        // 指定した座標へジャンプ（ズームレベルは少し広域の10に設定）
+        map.setView([lat, lon], 10);
+    }
+
+
+    // ==================================================
+    // 5. 画像保存機能
     // ==================================================
     const snapshotOptions = {
         hideElementsWithSelectors: [
@@ -137,20 +213,21 @@
 
     function downloadMapImage() {
         const bounds = map.getBounds();
-        // 座標取得（林小班図アプリ命名規則用）
         const south = bounds.getSouth().toFixed(6);
         const west = bounds.getWest().toFixed(6);
         const north = bounds.getNorth().toFixed(6);
         const east = bounds.getEast().toFixed(6);
         
-        // 選択中のレイヤー名を取得（ファイル名に付けると管理しやすい）
+        // ファイル名のプレフィックス決定
         let activeLayerName = "map";
         map.eachLayer(function(layer){
-            // 簡易的に判定（実際には複数の場合があるが、ベースマップ名を推測）
             if(layer === photo) activeLayerName = "photo";
+            else if(layer === photoOld) activeLayerName = "old74"; // ★追加
             else if(layer === slope) activeLayerName = "slope";
             else if(layer === std) activeLayerName = "std";
             else if(layer === esri) activeLayerName = "satellite";
+            else if(layer === pale) activeLayerName = "pale";
+            else if(layer === relief) activeLayerName = "relief";
         });
 
         const filename = `${activeLayerName}_${south}_${west}_${north}_${east}.jpg`;
