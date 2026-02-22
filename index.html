@@ -142,7 +142,7 @@
     // A. 地理院地図：最新空中写真
     const photo = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', opt);
 
-    // ★追加★ A2. 地理院地図：空中写真（1974-1978年頃）
+    // A2. 地理院地図：空中写真（1974-1978年頃）
     const photoOld = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/gazo1/{z}/{x}/{y}.jpg', opt);
 
     // B. 地理院地図：標準地図
@@ -164,6 +164,13 @@
     // F. Esri World Imagery
     const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', optEsri);
 
+    // ★追加★ G. 林野庁：森林計画対象森林レイヤ（全国林班・小班）
+    const rinpan = L.tileLayer('https://rinya-tiles.geospatial.jp/fr_layer_webp_2025/{z}/{x}/{y}.webp', {
+        attribution: '林野庁 森林計画対象森林レイヤ',
+        crossOrigin: "anonymous", 
+        maxZoom: 16 // APIの仕様に基づき最大16
+    });
+
     // 初期表示
     photo.addTo(map);
 
@@ -172,12 +179,13 @@
     // ==================================================
     const baseMaps = {
         "最新空中写真（地理院）": photo,
-        "過去空中写真(1974-78)": photoOld, // ★追加
+        "過去空中写真(1974-78)": photoOld,
         "衛星画像（Esri）": esri,
         "標準地図": std,
         "淡色地図": pale,
         "傾斜量図（地形把握）": slope,
-        "色別標高図": relief
+        "色別標高図": relief,
+        "全国林班・小班（林野庁）": rinpan // ★追加
     };
 
     L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
@@ -222,12 +230,13 @@
         let activeLayerName = "map";
         map.eachLayer(function(layer){
             if(layer === photo) activeLayerName = "photo";
-            else if(layer === photoOld) activeLayerName = "old74"; // ★追加
+            else if(layer === photoOld) activeLayerName = "old74";
             else if(layer === slope) activeLayerName = "slope";
             else if(layer === std) activeLayerName = "std";
             else if(layer === esri) activeLayerName = "satellite";
             else if(layer === pale) activeLayerName = "pale";
             else if(layer === relief) activeLayerName = "relief";
+            else if(layer === rinpan) activeLayerName = "rinpan"; // ★追加
         });
 
         const filename = `${activeLayerName}_${south}_${west}_${north}_${east}.jpg`;
