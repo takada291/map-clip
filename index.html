@@ -127,10 +127,27 @@
 <script src="https://unpkg.com/leaflet-simple-map-screenshoter"></script>
 
 <script>
-    // 1. 地図の初期化（初期位置：福井県庁付近）
+    // ★追加★ URLからパラメータ（緯度経度）を受け取る処理
+    const urlParams = new URLSearchParams(window.location.search);
+    const latParam = urlParams.get('lat');
+    const lonParam = urlParams.get('lon');
+
+    // デフォルトの開始位置（福井県庁付近）
+    let startLat = 36.065;
+    let startLon = 136.221;
+    let startZoom = 15;
+
+    // もしURLに座標が入っていれば、その座標で上書きする
+    if (latParam && lonParam && !isNaN(latParam) && !isNaN(lonParam)) {
+        startLat = parseFloat(latParam);
+        startLon = parseFloat(lonParam);
+        startZoom = 16; // 撮影位置へジャンプしたと分かりやすいよう、少し拡大しておく
+    }
+
+    // 1. 地図の初期化（受け取った座標を使ってスタート！）
     const map = L.map('map', {
         preferCanvas: true
-    }).setView([36.065, 136.221], 15);
+    }).setView([startLat, startLon], startZoom);
 
     // ==================================================
     // 2. 地図データの定義
@@ -164,7 +181,7 @@
     // F. Esri World Imagery
     const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', optEsri);
 
-    // ★追加★ G. 林野庁：森林計画対象森林レイヤ（全国林班・小班）
+    // G. 林野庁：森林計画対象森林レイヤ（全国林班・小班）
     const rinpan = L.tileLayer('https://rinya-tiles.geospatial.jp/fr_layer_webp_2025/{z}/{x}/{y}.webp', {
         attribution: '林野庁 森林計画対象森林レイヤ',
         crossOrigin: "anonymous", 
@@ -185,7 +202,7 @@
         "淡色地図": pale,
         "傾斜量図（地形把握）": slope,
         "色別標高図": relief,
-        "全国林班図（民有：薄緑、国有：濃緑）": rinpan // ★追加R8.2.23
+        "全国林班図（民有：薄緑、国有：濃緑）": rinpan
     };
 
     L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
@@ -236,7 +253,7 @@
             else if(layer === esri) activeLayerName = "satellite";
             else if(layer === pale) activeLayerName = "pale";
             else if(layer === relief) activeLayerName = "relief";
-            else if(layer === rinpan) activeLayerName = "rinpan"; // ★追加
+            else if(layer === rinpan) activeLayerName = "rinpan";
         });
 
         const filename = `${activeLayerName}_${south}_${west}_${north}_${east}.jpg`;
@@ -256,4 +273,3 @@
 
 </body>
 </html>
-
