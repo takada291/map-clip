@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出</title>
+    <title>地図切出 (Exif対応版)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -17,11 +17,10 @@
             align-items: center;
             z-index: 1000;
             border-bottom: 1px solid #ccc;
-            flex-wrap: wrap; /* スマホでボタンが溢れないように */
+            flex-wrap: wrap;
         }
         #map { flex-grow: 1; width: 100%; }
         
-        /* ボタンのデザイン */
         button {
             padding: 8px 16px;
             font-size: 16px;
@@ -35,7 +34,6 @@
         }
         button:hover { background-color: #0056b3; }
 
-        /* 都道府県セレクトボックスのデザイン */
         select {
             padding: 8px;
             font-size: 16px;
@@ -43,7 +41,6 @@
             border: 1px solid #ccc;
         }
         
-        /* 画面中央の十字キー */
         .crosshair {
             position: absolute;
             top: 50%;
@@ -117,7 +114,7 @@
         <option value="26.212,127.681">沖縄県</option>
     </select>
     
-    <button onclick="downloadMapImage()">現在表示中の地図を保存</button>
+    <button onclick="downloadMapImageWithExif()">現在表示中の地図を保存(Exif付)</button>
 </div>
 
 <div class="crosshair"></div>
@@ -125,33 +122,29 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet-simple-map-screenshoter"></script>
+<script src="https://unpkg.com/piexifjs@1.0.6/piexif.js"></script>
 
 <script>
-    // ★追加・変更★ URLからパラメータ（緯度経度）を受け取る処理
     const urlParams = new URLSearchParams(window.location.search);
     const latParam = urlParams.get('lat');
     const lonParam = urlParams.get('lon');
 
-    // デフォルトの開始位置（福井県庁付近）
     let startLat = 36.065;
     let startLon = 136.221;
     let startZoom = 15;
-    let isJumped = false; // ジャンプしてきたかどうかの判定フラグ
+    let isJumped = false; 
 
-    // もしURLに座標が入っていれば、その座標で上書きする
     if (latParam && lonParam && !isNaN(latParam) && !isNaN(lonParam)) {
         startLat = parseFloat(latParam);
         startLon = parseFloat(lonParam);
         startZoom = 16; 
-        isJumped = true; // ジャンプしてきた！
+        isJumped = true; 
     }
 
-    // 1. 地図の初期化
     const map = L.map('map', {
         preferCanvas: true
     }).setView([startLat, startLon], startZoom);
 
-    // ★追加★ ピンの画像が見つからないエラーを防ぐため、画像のURLを明示的に指定
     delete L.Icon.Default.prototype._getIconUrl;
     L.Icon.Default.mergeOptions({
         iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -159,60 +152,30 @@
         shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
     });
 
-    // ★追加★ ジャンプしてきた場合はピンを立てて、十字キーを消す
     if (isJumped) {
-        // その座標に青いピンを立てる（文字も表示）
         L.marker([startLat, startLon]).addTo(map).bindPopup('<b>指定された位置</b>').openPopup();
-        // ズレて見えて紛らわしい赤い十字キーは非表示にする
         document.querySelector('.crosshair').style.display = 'none';
     }
 
 
-    // ==================================================
-    // 2. 地図データの定義
-    // ==================================================
-    
     const opt = { attribution: '地理院タイル', crossOrigin: "anonymous", maxZoom: 18 };
     const optEsri = { attribution: 'Esri World Imagery', crossOrigin: "anonymous", maxZoom: 18 };
 
-    // A. 地理院地図：最新空中写真
     const photo = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg', opt);
-
-    // A2. 地理院地図：空中写真（1974-1978年頃）
     const photoOld = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/gazo1/{z}/{x}/{y}.jpg', opt);
-
-    // B. 地理院地図：標準地図
     const std = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', opt);
-
-    // C. 地理院地図：淡色地図
     const pale = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', opt);
-
-    // D. 地理院地図：傾斜量図
-    const slope = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/slopemap/{z}/{x}/{y}.png', {
-        ...opt, opacity: 0.7 
-    });
-
-    // E. 地理院地図：色別標高図
-    const relief = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/relief/{z}/{x}/{y}.png', {
-        ...opt, opacity: 0.6
-    });
-
-    // F. Esri World Imagery
+    const slope = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/slopemap/{z}/{x}/{y}.png', { ...opt, opacity: 0.7 });
+    const relief = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/relief/{z}/{x}/{y}.png', { ...opt, opacity: 0.6 });
     const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', optEsri);
-
-    // G. 林野庁：森林計画対象森林レイヤ（全国林班・小班）
     const rinpan = L.tileLayer('https://rinya-tiles.geospatial.jp/fr_layer_webp_2025/{z}/{x}/{y}.webp', {
         attribution: '林野庁 森林計画対象森林レイヤ',
         crossOrigin: "anonymous", 
         maxZoom: 16
     });
 
-    // 初期表示
     photo.addTo(map);
 
-    // ==================================================
-    // 3. レイヤー切り替えコントロール
-    // ==================================================
     const baseMaps = {
         "最新空中写真（地理院）": photo,
         "過去空中写真(1974-78)": photoOld,
@@ -226,23 +189,14 @@
 
     L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
 
-
-    // ==================================================
-    // 4. 都道府県切り替え機能
-    // ==================================================
     function changePref() {
         const select = document.getElementById("prefSelect");
-        const val = select.value.split(","); // "lat,lon" を分割
+        const val = select.value.split(","); 
         const lat = parseFloat(val[0]);
         const lon = parseFloat(val[1]);
-        
         map.setView([lat, lon], 10);
     }
 
-
-    // ==================================================
-    // 5. 画像保存機能
-    // ==================================================
     const snapshotOptions = {
         hideElementsWithSelectors: [
             ".leaflet-control-container",
@@ -254,7 +208,8 @@
     };
     const screenshoter = L.simpleMapScreenshoter(snapshotOptions).addTo(map);
 
-    function downloadMapImage() {
+    // ★大改造★ Exifを書き込んで保存する関数
+    function downloadMapImageWithExif() {
         const bounds = map.getBounds();
         const south = bounds.getSouth().toFixed(6);
         const west = bounds.getWest().toFixed(6);
@@ -273,13 +228,36 @@
             else if(layer === rinpan) activeLayerName = "rinpan";
         });
 
+        // 依然としてファイル名にも座標を入れておきます（人間が見て分かるように）
         const filename = `${activeLayerName}_${south}_${west}_${north}_${east}.jpg`;
 
         screenshoter.takeScreen('image')
-            .then(image => {
+            .then(jpegDataUrl => {
+                
+                // --- ここからが Exif 埋め込みの魔法 ---
+                // 保存する座標をカンマ区切りの文字列にします
+                const coordsString = `${south},${west},${north},${east}`;
+                
+                // 空のExifデータ（キャンバス）を作成
+                const zeroth = {};
+                const exif = {};
+                const gps = {};
+                
+                // Exifの「ImageDescription（画像の説明）」という項目に、座標文字列を隠して書き込む
+                zeroth[piexif.ImageIFD.ImageDescription] = coordsString;
+                
+                const exifObj = {"0th": zeroth, "Exif": exif, "GPS": gps};
+                // Exifデータをバイナリに変換
+                const exifBytes = piexif.dump(exifObj);
+                
+                // 生成された地図画像(jpegDataUrl)に、Exifバイナリを合体させる！
+                const newDataUrl = piexif.insert(exifBytes, jpegDataUrl);
+                // --- 魔法ここまで ---
+
+                // 合体済みの新しい画像をダウンロードさせる
                 const link = document.createElement('a');
                 link.download = filename;
-                link.href = image;
+                link.href = newDataUrl;
                 link.click();
             })
             .catch(e => {
