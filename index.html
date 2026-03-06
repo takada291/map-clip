@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 (Exif対応版)</title>
+    <title>地図切出</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -173,7 +173,12 @@
         crossOrigin: "anonymous", 
         maxZoom: 16
     });
-
+    const forestMesh = L.tileLayer('https://rinya-tiles.geospatial.jp/fr_mesh20m_webp_2025/{z}/{x}/{y}.webp', {
+        attribution: '林野庁 全国森林資源メッシュ',
+        crossOrigin: "anonymous", 
+        maxZoom: 16
+    });
+    
     photo.addTo(map);
 
     const baseMaps = {
@@ -185,6 +190,7 @@
         "傾斜量図（地形把握）": slope,
         "色別標高図": relief,
         "全国林班図（民有：薄緑、国有：濃緑）": rinpan
+        "全国森林資源メッシュ": forestMesh
     };
 
     L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
@@ -226,6 +232,7 @@
             else if(layer === pale) activeLayerName = "pale";
             else if(layer === relief) activeLayerName = "relief";
             else if(layer === rinpan) activeLayerName = "rinpan";
+            else if(layer === forestMesh) activeLayerName = "mesh";
         });
 
         // 依然としてファイル名にも座標を入れておきます（人間が見て分かるように）
@@ -268,3 +275,4 @@
 
 </body>
 </html>
+
