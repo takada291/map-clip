@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.4</title>
+    <title>地図切出 v3.5</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -200,38 +200,39 @@
     });
 
     // ==========================================
-    // ★大改造★ 森林資源メッシュ (ラスタ + ベクタ属性)
+    // 森林資源メッシュ (ラスタ + ベクタ属性)
     // ==========================================
-    // 1. 色分け表示用のラスタタイル
     const forestMeshRaster = L.tileLayer('https://rinya-tiles.geospatial.jp/fr_mesh20m_webp_2025/{z}/{x}/{y}.webp', {
         attribution: '林野庁 全国森林資源メッシュ',
         crossOrigin: "anonymous", 
         maxZoom: 16
     });
 
-    // 2. タップ検知＆属性表示用のベクタータイル (ズーム13以上で読み込まれます)
-    // 見た目の邪魔にならないよう、ごく薄い白い枠線と透明な塗りを設定します
+    // ★修正★ タップ検知＆属性表示用のベクタータイル (ズーム13以上)
+    // 見た目の邪魔にならないよう、透明なSVGで描画して当たり判定を作ります
     const meshHitStyle = {
-        weight: 0.5,
-        color: 'rgba(255, 255, 255, 0.3)', // 薄い白い枠線
-        fillOpacity: 0.01,                 // タップ検知用
+        weight: 1,
+        color: '#ffffff',
+        opacity: 0.01,
+        fillColor: '#ffffff',
+        fillOpacity: 0.01,
         fill: true,
         stroke: true
     };
     
     const forestMeshVector = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
-        rendererFactory: L.canvas.tile,
+        rendererFactory: L.svg.tile, // ★ CanvasからSVGに変更（クリック判定を確実にするため）
         interactive: true,
         minZoom: 13,
         maxNativeZoom: 16,
         vectorTileLayerStyles: {
             'fr_mesh20m': meshHitStyle,
             'mesh': meshHitStyle,
-            'default': meshHitStyle
+            'default': meshHitStyle,
+            'fr_mesh': meshHitStyle
         }
     });
 
-    // 3. メッシュをタップした時のポップアップ処理
     forestMeshVector.on('click', function(e) {
         const props = e.layer.properties;
         if (!props) return;
@@ -239,7 +240,6 @@
         let content = '<div style="line-height:1.5; max-height:250px; overflow-y:auto;">';
         content += '<b style="color:#004d26; border-bottom:1px solid #ccc; display:block; margin-bottom:5px;">🌲 森林資源メッシュ詳細</b>';
         
-        // 空のデータ（Nullや空欄）を省いて表示する
         for (let key in props) {
             if (props[key] !== null && props[key] !== "Null" && props[key] !== "") {
                 content += `<b>${key}:</b> ${props[key]}<br>`;
@@ -253,26 +253,7 @@
          .openOn(map);
     });
 
-    // 4. ラスタとベクタを１つのレイヤーとしてグループ化
     const forestMeshGroup = L.layerGroup([forestMeshRaster, forestMeshVector]);
-
-    // ==========================================
-    // ★追加★ 法務省：公図データの読み込み（ピンク線）
-    // ==========================================
-    const kozu = L.vectorGrid.protobuf('https://x.optgeo.org/a/{z}/{x}/{y}.mvt', {
-        rendererFactory: L.canvas.tile,
-        interactive: false, 
-        vectorTileLayerStyles: {
-            fude: {
-                weight: 1.5,
-                color: '#ff00ff', // ピンク（マゼンタ）で描画
-                fillOpacity: 0 
-            }
-        },
-        minZoom: 10,
-        maxNativeZoom: 16,
-        attribution: '法務省 登記所備付地図データ (変換: optgeo)'
-    });
 
     photo.addTo(map);
 
@@ -285,8 +266,7 @@
         "傾斜量図（地形把握）": slope,
         "色別標高図": relief,
         "全国林班図（民有：薄緑、国有：濃緑）": rinpan,
-        "全国森林資源メッシュ（★タップで属性表示）": forestMeshGroup, // グループに変更
-        "公図（登記所備付地図・ピンク線）": kozu
+        "全国森林資源メッシュ（★ズーム＆タップで属性表示）": forestMeshGroup
     };
 
     L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
@@ -314,7 +294,6 @@
     };
     legend.addTo(map);
 
-    // 森林資源メッシュ選択時のみ凡例表示
     map.on('baselayerchange', function(eventLayer) {
         const legendElement = document.querySelector('.info.legend');
         if (eventLayer.name.includes("全国森林資源メッシュ")) {
@@ -362,7 +341,6 @@
             else if(layer === relief) activeLayerName = "relief";
             else if(layer === rinpan) activeLayerName = "rinpan";
             else if(layer === forestMeshGroup || layer === forestMeshRaster || layer === forestMeshVector) activeLayerName = "mesh";
-            else if(layer === kozu) activeLayerName = "kozu"; 
         });
 
         const filename = `${activeLayerName}_${south}_${west}_${north}_${east}.jpg`;
