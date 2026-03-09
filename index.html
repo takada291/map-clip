@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.10</title>
+    <title>地図切出 v3.11</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -198,14 +198,8 @@
         maxZoom: 16
     });
 
-    // レイヤー名総当たり用リスト
-    const pbfLayerNames = [
-        'fr_mesh20m', 'fr_mesh20m_pbf_2025', 'fr_mesh20m_webp_2025', 'fr_mesh20m_2025',
-        'fr_mesh', 'mesh', 'mesh20m', 'default', 'layer', 'data'
-    ];
-
     // ==========================================
-    // 1. 通常の森林資源メッシュ (ラスタ + タップ用ベクタ)
+    // 1. 通常の森林資源メッシュ (ラスタ + タップ用細線ベクタ)
     // ==========================================
     const forestMeshRaster = L.tileLayer('https://rinya-tiles.geospatial.jp/fr_mesh20m_webp_2025/{z}/{x}/{y}.webp', {
         attribution: '林野庁 全国森林資源メッシュ',
@@ -213,24 +207,31 @@
         maxZoom: 16
     });
 
+    // ★修正★ デフォルトの太い青線を封じ、細くて見やすい半透明ブルーに設定
     const meshHitStyle = { 
-        weight: 0.3, 
-        color: 'rgba(255, 255, 255, 0.4)', 
+        weight: 0.5,             // 細い線
+        color: '#3388ff',        // 青色
+        opacity: 0.4,            // 半透明で見やすく
         fillColor: '#ffffff', 
-        fillOpacity: 0.0, 
+        fillOpacity: 0.01,       // タップ判定用にほぼ透明
         fill: true, 
         stroke: true 
     };
 
-    const normalStyles = {};
-    pbfLayerNames.forEach(name => { normalStyles[name] = meshHitStyle; });
+    // ★魔法★ どんなレイヤー名が来ても絶対に上のデザインを適用させる
+    const normalStylesProxy = new Proxy({}, {
+        get: function(target, prop) {
+            if (typeof prop === 'string' && (prop === 'constructor' || prop === '__proto__')) return undefined;
+            return meshHitStyle;
+        }
+    });
     
     const forestMeshVector = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
         rendererFactory: L.svg.tile,
         interactive: true,
         minZoom: 15,
         maxNativeZoom: 16,
-        vectorTileLayerStyles: normalStyles
+        vectorTileLayerStyles: normalStylesProxy // 魔法のProxyをセット
     });
 
     forestMeshVector.on('click', function(e) {
@@ -253,7 +254,7 @@
 
 
     // ==========================================
-    // ★大改造★ 2. 主伐適地モード（林種＝人工林、かつ林齢40年以上）
+    // 2. 主伐適地モード（林種＝人工林、かつ林齢40年以上）
     // ==========================================
     const shubatsuStyle = function(props) {
         let isTargetType = false;
@@ -265,10 +266,8 @@
             let v = props[key].toString();
             
             // ① 林種に「人工」が含まれるか判定
-            if (k.includes('林種')) {
-                if (v.includes('人工')) {
-                    isTargetType = true;
-                }
+            if (k.includes('林種') && v.includes('人工')) {
+                isTargetType = true;
             }
             
             // ② 林齢が40以上か判定（複数の林齢カラムがあっても1つでもクリアすればOK）
@@ -283,9 +282,9 @@
         // ①と②を両方満たしたメッシュだけ黄金色に塗る
         if (isTargetType && isTargetAge) {
             return {
-                weight: 0.5,
-                color: '#ff4500', 
-                fillColor: '#ffd700', 
+                weight: 1.0,           // ★修正★ 以前より細い線に
+                color: '#ff4500',      // 枠はオレンジレッド
+                fillColor: '#ffd700',  // 塗りは黄金色
                 fillOpacity: 0.65,
                 fill: true,
                 stroke: true
@@ -296,15 +295,20 @@
         return { weight: 0, opacity: 0, fillOpacity: 0, stroke: false, fill: false };
     };
 
-    const shubatsuStylesObj = {};
-    pbfLayerNames.forEach(name => { shubatsuStylesObj[name] = shubatsuStyle; });
+    // ★魔法★ 同様にどんなレイヤー名が来ても絶対に検索処理を実行させる
+    const shubatsuStylesProxy = new Proxy({}, {
+        get: function(target, prop) {
+            if (typeof prop === 'string' && (prop === 'constructor' || prop === '__proto__')) return undefined;
+            return shubatsuStyle;
+        }
+    });
 
     const shubatsuMesh = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
         rendererFactory: L.canvas.tile, 
         interactive: false, 
         minZoom: 13,
         maxNativeZoom: 16,
-        vectorTileLayerStyles: shubatsuStylesObj
+        vectorTileLayerStyles: shubatsuStylesProxy // 魔法のProxyをセット
     });
 
     photo.addTo(map);
