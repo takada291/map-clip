@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.7</title>
+    <title>地図切出 v3.8</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -238,13 +238,12 @@
     const forestMeshGroup = L.layerGroup([forestMeshRaster, forestMeshVector]);
 
     // ==========================================
-    // ★大改造★ 2. お宝発掘モード（スギ・ヒノキ 50年生以上を抽出）
+    // 2. 主伐適地モード（スギ/ヒノキ/カラマツ 40年生以上を抽出）
     // ==========================================
-    const treasureStyle = function(props) {
+    const shubatsuStyle = function(props) {
         let age = 0;
         let species = "";
         
-        // どんな属性名で入っていても「林齢」「樹種」の文字を探し出して判定します
         for (let key in props) {
             if (props[key] === null) continue;
             let k = key.toString();
@@ -254,36 +253,32 @@
             if (k.includes('樹種') || k.includes('species')) species = v;
         }
 
-        // 条件：50年生以上 かつ (スギ または ヒノキ)
-        if (age >= 50 && (species.includes('スギ') || species.includes('ヒノキ'))) {
+        // ★修正★ 条件：40年生以上 かつ (スギ または ヒノキ または カラマツ)
+        if (age >= 40 && (species.includes('スギ') || species.includes('ヒノキ') || species.includes('カラマツ'))) {
             return {
                 weight: 1.5,
-                color: '#ff4500', // 枠線は目立つオレンジレッド
-                fillColor: '#ffd700', // 塗りは黄金色（ゴールド）
+                color: '#ff4500', 
+                fillColor: '#ffd700', 
                 fillOpacity: 0.65,
                 fill: true,
                 stroke: true
             };
         }
-        // 条件に合わないメッシュは完全に透明にして隠す
         return { weight: 0, fillOpacity: 0, stroke: false };
     };
 
-    const treasureMesh = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
-        rendererFactory: L.canvas.tile, // 大量描画に強いCanvas方式を採用！
-        interactive: false, // 見るだけなのでタップ判定はオフ（軽くするため）
-        minZoom: 13, // 広い範囲を見渡せるように、少し引いたズーム13から表示開始
+    const shubatsuMesh = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
+        rendererFactory: L.canvas.tile, 
+        interactive: false, 
+        minZoom: 13, // ここが13なので、これよりズームアウトすると表示されません
         maxNativeZoom: 16,
         vectorTileLayerStyles: {
-            'fr_mesh20m': treasureStyle, 'mesh': treasureStyle, 'default': treasureStyle, 'fr_mesh': treasureStyle
+            'fr_mesh20m': shubatsuStyle, 'mesh': shubatsuStyle, 'default': shubatsuStyle, 'fr_mesh': shubatsuStyle
         }
     });
 
     photo.addTo(map);
 
-    // ==========================================
-    // メニューの登録（ラジオボタンとチェックボックスを分ける）
-    // ==========================================
     const baseMaps = {
         "最新空中写真（地理院）": photo,
         "過去空中写真(1974-78)": photoOld,
@@ -296,9 +291,9 @@
         "全国森林資源メッシュ（タップで詳細）": forestMeshGroup
     };
 
-    // ★追加★ 背景地図の上に「重ねる」ためのオーバーレイレイヤー
+    // ★名称変更★
     const overlayMaps = {
-        "🔥 お宝発掘モード（スギ/ヒノキ 50年生以上）": treasureMesh
+        "🪚 主伐適地モード（スギ/ヒノキ/カラマツ 40年生以上）": shubatsuMesh
     };
 
     L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
@@ -373,12 +368,12 @@
             else if(layer === pale) activeLayerName = "pale";
             else if(layer === relief) activeLayerName = "relief";
             else if(layer === rinpan) activeLayerName = "rinpan";
-            else if(layer === forestMeshGroup || layer === forestMeshRaster || layer === forestMeshVector) activeLayerName = "mesh";
+            else if(layer === forestMeshGroup || layer === forestMeshRaster) activeLayerName = "mesh";
         });
         
-        // お宝発掘モードがオンならファイル名に「treasure_」を付ける
-        if(map.hasLayer(treasureMesh)) {
-            activeLayerName = "treasure_" + activeLayerName;
+        // ★修正★ 保存時のファイル名プレフィックス
+        if(map.hasLayer(shubatsuMesh)) {
+            activeLayerName = "shubatsu_" + activeLayerName;
         }
 
         const filename = `${activeLayerName}_${south}_${west}_${north}_${east}.jpg`;
