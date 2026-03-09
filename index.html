@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.6</title>
+    <title>地図切出 v3.7</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -82,7 +82,6 @@
             border-radius: 2px;
         }
         
-        /* ポップアップ内のスタイル調整 */
         .leaflet-popup-content { margin: 10px; font-size: 12px; }
     </style>
 </head>
@@ -200,7 +199,7 @@
     });
 
     // ==========================================
-    // 森林資源メッシュ (ラスタ + ベクタ属性)
+    // 1. 通常の森林資源メッシュ (ラスタ + タップ用透明ベクタ)
     // ==========================================
     const forestMeshRaster = L.tileLayer('https://rinya-tiles.geospatial.jp/fr_mesh20m_webp_2025/{z}/{x}/{y}.webp', {
         attribution: '林野庁 全国森林資源メッシュ',
@@ -208,27 +207,15 @@
         maxZoom: 16
     });
 
-    const meshHitStyle = {
-        weight: 1,
-        color: '#ffffff',
-        opacity: 0.01,
-        fillColor: '#ffffff',
-        fillOpacity: 0.01,
-        fill: true,
-        stroke: true
-    };
+    const meshHitStyle = { weight: 1, color: '#ffffff', opacity: 0.01, fillColor: '#ffffff', fillOpacity: 0.01, fill: true, stroke: true };
     
-    // ★大改造★ ベクター読み込みのズームレベルを13から「15」に変更しました
     const forestMeshVector = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
         rendererFactory: L.svg.tile,
         interactive: true,
-        minZoom: 15, // ★ここを変更（広範囲のときは読み込まれず軽快に動きます）
+        minZoom: 15,
         maxNativeZoom: 16,
         vectorTileLayerStyles: {
-            'fr_mesh20m': meshHitStyle,
-            'mesh': meshHitStyle,
-            'default': meshHitStyle,
-            'fr_mesh': meshHitStyle
+            'fr_mesh20m': meshHitStyle, 'mesh': meshHitStyle, 'default': meshHitStyle, 'fr_mesh': meshHitStyle
         }
     });
 
@@ -238,7 +225,6 @@
 
         let content = '<div style="line-height:1.5; max-height:250px; overflow-y:auto;">';
         content += '<b style="color:#004d26; border-bottom:1px solid #ccc; display:block; margin-bottom:5px;">🌲 森林資源メッシュ詳細</b>';
-        
         for (let key in props) {
             if (props[key] !== null && props[key] !== "Null" && props[key] !== "") {
                 content += `<b>${key}:</b> ${props[key]}<br>`;
@@ -246,16 +232,58 @@
         }
         content += '</div>';
 
-        L.popup()
-         .setLatLng(e.latlng)
-         .setContent(content)
-         .openOn(map);
+        L.popup().setLatLng(e.latlng).setContent(content).openOn(map);
     });
 
     const forestMeshGroup = L.layerGroup([forestMeshRaster, forestMeshVector]);
 
+    // ==========================================
+    // ★大改造★ 2. お宝発掘モード（スギ・ヒノキ 50年生以上を抽出）
+    // ==========================================
+    const treasureStyle = function(props) {
+        let age = 0;
+        let species = "";
+        
+        // どんな属性名で入っていても「林齢」「樹種」の文字を探し出して判定します
+        for (let key in props) {
+            if (props[key] === null) continue;
+            let k = key.toString();
+            let v = props[key].toString();
+            
+            if (k.includes('林齢') || k.includes('age')) age = parseInt(v, 10);
+            if (k.includes('樹種') || k.includes('species')) species = v;
+        }
+
+        // 条件：50年生以上 かつ (スギ または ヒノキ)
+        if (age >= 50 && (species.includes('スギ') || species.includes('ヒノキ'))) {
+            return {
+                weight: 1.5,
+                color: '#ff4500', // 枠線は目立つオレンジレッド
+                fillColor: '#ffd700', // 塗りは黄金色（ゴールド）
+                fillOpacity: 0.65,
+                fill: true,
+                stroke: true
+            };
+        }
+        // 条件に合わないメッシュは完全に透明にして隠す
+        return { weight: 0, fillOpacity: 0, stroke: false };
+    };
+
+    const treasureMesh = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
+        rendererFactory: L.canvas.tile, // 大量描画に強いCanvas方式を採用！
+        interactive: false, // 見るだけなのでタップ判定はオフ（軽くするため）
+        minZoom: 13, // 広い範囲を見渡せるように、少し引いたズーム13から表示開始
+        maxNativeZoom: 16,
+        vectorTileLayerStyles: {
+            'fr_mesh20m': treasureStyle, 'mesh': treasureStyle, 'default': treasureStyle, 'fr_mesh': treasureStyle
+        }
+    });
+
     photo.addTo(map);
 
+    // ==========================================
+    // メニューの登録（ラジオボタンとチェックボックスを分ける）
+    // ==========================================
     const baseMaps = {
         "最新空中写真（地理院）": photo,
         "過去空中写真(1974-78)": photoOld,
@@ -265,10 +293,15 @@
         "傾斜量図（地形把握）": slope,
         "色別標高図": relief,
         "全国林班図（民有：薄緑、国有：濃緑）": rinpan,
-        "全国森林資源メッシュ（★ズーム＆タップで属性表示）": forestMeshGroup
+        "全国森林資源メッシュ（タップで詳細）": forestMeshGroup
     };
 
-    L.control.layers(baseMaps, null, { collapsed: false }).addTo(map);
+    // ★追加★ 背景地図の上に「重ねる」ためのオーバーレイレイヤー
+    const overlayMaps = {
+        "🔥 お宝発掘モード（スギ/ヒノキ 50年生以上）": treasureMesh
+    };
+
+    L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
 
     const legend = L.control({position: 'bottomleft'});
     legend.onAdd = function (map) {
@@ -289,9 +322,7 @@
         for (let i = 0; i < categories.length; i++) {
             div.innerHTML += '<i style="background:' + categories[i].color + '"></i> ' + categories[i].label + '<br>';
         }
-        // ★追加★ 凡例の下に注意書きを足しました
         div.innerHTML += '<div style="margin-top: 8px; font-size: 10px; color: #666; line-height: 1.2;">※タップでの詳細表示は<br>地図拡大時のみ有効です</div>';
-        
         return div;
     };
     legend.addTo(map);
@@ -344,6 +375,11 @@
             else if(layer === rinpan) activeLayerName = "rinpan";
             else if(layer === forestMeshGroup || layer === forestMeshRaster || layer === forestMeshVector) activeLayerName = "mesh";
         });
+        
+        // お宝発掘モードがオンならファイル名に「treasure_」を付ける
+        if(map.hasLayer(treasureMesh)) {
+            activeLayerName = "treasure_" + activeLayerName;
+        }
 
         const filename = `${activeLayerName}_${south}_${west}_${north}_${east}.jpg`;
 
