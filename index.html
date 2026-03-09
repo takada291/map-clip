@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.5</title>
+    <title>地図切出 v3.6</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -208,8 +208,6 @@
         maxZoom: 16
     });
 
-    // ★修正★ タップ検知＆属性表示用のベクタータイル (ズーム13以上)
-    // 見た目の邪魔にならないよう、透明なSVGで描画して当たり判定を作ります
     const meshHitStyle = {
         weight: 1,
         color: '#ffffff',
@@ -220,10 +218,11 @@
         stroke: true
     };
     
+    // ★大改造★ ベクター読み込みのズームレベルを13から「15」に変更しました
     const forestMeshVector = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
-        rendererFactory: L.svg.tile, // ★ CanvasからSVGに変更（クリック判定を確実にするため）
+        rendererFactory: L.svg.tile,
         interactive: true,
-        minZoom: 13,
+        minZoom: 15, // ★ここを変更（広範囲のときは読み込まれず軽快に動きます）
         maxNativeZoom: 16,
         vectorTileLayerStyles: {
             'fr_mesh20m': meshHitStyle,
@@ -290,6 +289,9 @@
         for (let i = 0; i < categories.length; i++) {
             div.innerHTML += '<i style="background:' + categories[i].color + '"></i> ' + categories[i].label + '<br>';
         }
+        // ★追加★ 凡例の下に注意書きを足しました
+        div.innerHTML += '<div style="margin-top: 8px; font-size: 10px; color: #666; line-height: 1.2;">※タップでの詳細表示は<br>地図拡大時のみ有効です</div>';
+        
         return div;
     };
     legend.addTo(map);
