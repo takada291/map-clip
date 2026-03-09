@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.9</title>
+    <title>地図切出 v3.10</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -198,9 +198,7 @@
         maxZoom: 16
     });
 
-    // ==========================================
-    // レイヤー名総当たり用リスト（太い青線を防ぐための対策）
-    // ==========================================
+    // レイヤー名総当たり用リスト
     const pbfLayerNames = [
         'fr_mesh20m', 'fr_mesh20m_pbf_2025', 'fr_mesh20m_webp_2025', 'fr_mesh20m_2025',
         'fr_mesh', 'mesh', 'mesh20m', 'default', 'layer', 'data'
@@ -215,7 +213,6 @@
         maxZoom: 16
     });
 
-    // ★修正★ 通常メッシュの線を極細・半透明の白にして見やすく調整
     const meshHitStyle = { 
         weight: 0.3, 
         color: 'rgba(255, 255, 255, 0.4)', 
@@ -256,10 +253,10 @@
 
 
     // ==========================================
-    // 2. 主伐適地モード（スギ/ヒノキ/カラマツ 40年生以上）
+    // ★大改造★ 2. 主伐適地モード（林種＝人工林、かつ林齢40年以上）
     // ==========================================
     const shubatsuStyle = function(props) {
-        let isTargetSpecies = false;
+        let isTargetType = false;
         let isTargetAge = false;
         
         for (let key in props) {
@@ -267,15 +264,15 @@
             let k = key.toString();
             let v = props[key].toString();
             
-            // 樹種の判定
-            if (k.includes('樹種') || k.includes('species')) {
-                if (v.includes('スギ') || v.includes('ヒノキ') || v.includes('カラマツ')) {
-                    isTargetSpecies = true;
+            // ① 林種に「人工」が含まれるか判定
+            if (k.includes('林種')) {
+                if (v.includes('人工')) {
+                    isTargetType = true;
                 }
             }
             
-            // ★大修正★ 林齢の判定（複数カラムあっても、1つでも40以上があればOKとする）
-            if (k.includes('林齢') || k.includes('age')) {
+            // ② 林齢が40以上か判定（複数の林齢カラムがあっても1つでもクリアすればOK）
+            if (k.includes('林齢')) {
                 let parsedAge = parseInt(v, 10);
                 if (!isNaN(parsedAge) && parsedAge >= 40) {
                     isTargetAge = true;
@@ -283,10 +280,10 @@
             }
         }
 
-        // 条件クリアなら黄金色で描画
-        if (isTargetSpecies && isTargetAge) {
+        // ①と②を両方満たしたメッシュだけ黄金色に塗る
+        if (isTargetType && isTargetAge) {
             return {
-                weight: 0.5,           // 主伐モードも線を少し細く
+                weight: 0.5,
                 color: '#ff4500', 
                 fillColor: '#ffd700', 
                 fillOpacity: 0.65,
@@ -294,6 +291,7 @@
                 stroke: true
             };
         }
+        
         // 条件から外れたら完全に透明（見えなくする）
         return { weight: 0, opacity: 0, fillOpacity: 0, stroke: false, fill: false };
     };
@@ -324,7 +322,7 @@
     };
 
     const overlayMaps = {
-        "🪚 主伐適地モード（スギ/ヒノキ/カラマツ 40年生以上）": shubatsuMesh
+        "🪚 主伐適地モード（人工林 40年生以上）": shubatsuMesh
     };
 
     L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
