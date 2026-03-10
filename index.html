@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.11</title>
+    <title>地図切出 v3.12</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -138,6 +138,13 @@
         <option value="26.212,127.681">沖縄県</option>
     </select>
     
+    <select id="ageThresholdSelect" onchange="changeAgeThreshold()">
+        <option value="40" selected>40年生以上</option>
+        <option value="60">60年生以上</option>
+        <option value="80">80年生以上</option>
+        <option value="100">100年生以上</option>
+    </select>
+    
     <button onclick="downloadMapImageWithExif()">現在表示中の地図を保存(Exif付)</button>
 </div>
 
@@ -158,6 +165,9 @@
     let startLon = 136.221;
     let startZoom = 15;
     let isJumped = false; 
+
+    // ★追加★ 現在選択されている林齢のしきい値（初期値は40）
+    let currentAgeThreshold = 40;
 
     if (latParam && lonParam && !isNaN(latParam) && !isNaN(lonParam)) {
         startLat = parseFloat(latParam);
@@ -198,6 +208,12 @@
         maxZoom: 16
     });
 
+    // レイヤー名総当たり用リスト
+    const pbfLayerNames = [
+        'fr_mesh20m', 'fr_mesh20m_pbf_2025', 'fr_mesh20m_webp_2025', 'fr_mesh20m_2025',
+        'fr_mesh', 'mesh', 'mesh20m', 'default', 'layer', 'data'
+    ];
+
     // ==========================================
     // 1. 通常の森林資源メッシュ (ラスタ + タップ用細線ベクタ)
     // ==========================================
@@ -207,18 +223,16 @@
         maxZoom: 16
     });
 
-    // ★修正★ デフォルトの太い青線を封じ、細くて見やすい半透明ブルーに設定
     const meshHitStyle = { 
-        weight: 0.5,             // 細い線
-        color: '#3388ff',        // 青色
-        opacity: 0.4,            // 半透明で見やすく
+        weight: 0.5, 
+        color: '#3388ff', 
+        opacity: 0.4, 
         fillColor: '#ffffff', 
-        fillOpacity: 0.01,       // タップ判定用にほぼ透明
+        fillOpacity: 0.01, 
         fill: true, 
         stroke: true 
     };
 
-    // ★魔法★ どんなレイヤー名が来ても絶対に上のデザインを適用させる
     const normalStylesProxy = new Proxy({}, {
         get: function(target, prop) {
             if (typeof prop === 'string' && (prop === 'constructor' || prop === '__proto__')) return undefined;
@@ -231,7 +245,7 @@
         interactive: true,
         minZoom: 15,
         maxNativeZoom: 16,
-        vectorTileLayerStyles: normalStylesProxy // 魔法のProxyをセット
+        vectorTileLayerStyles: normalStylesProxy 
     });
 
     forestMeshVector.on('click', function(e) {
@@ -254,7 +268,7 @@
 
 
     // ==========================================
-    // 2. 主伐適地モード（林種＝人工林、かつ林齢40年以上）
+    // 2. 主伐適地モード（林種＝人工林、かつ指定林齢以上）
     // ==========================================
     const shubatsuStyle = function(props) {
         let isTargetType = false;
@@ -270,10 +284,11 @@
                 isTargetType = true;
             }
             
-            // ② 林齢が40以上か判定（複数の林齢カラムがあっても1つでもクリアすればOK）
+            // ② 林齢が設定値（currentAgeThreshold）以上か判定
             if (k.includes('林齢')) {
                 let parsedAge = parseInt(v, 10);
-                if (!isNaN(parsedAge) && parsedAge >= 40) {
+                // ★修正★ 固定の「40」ではなく、ドロップダウンで選んだ数字を使います
+                if (!isNaN(parsedAge) && parsedAge >= currentAgeThreshold) {
                     isTargetAge = true;
                 }
             }
@@ -282,9 +297,9 @@
         // ①と②を両方満たしたメッシュだけ黄金色に塗る
         if (isTargetType && isTargetAge) {
             return {
-                weight: 1.0,           // ★修正★ 以前より細い線に
-                color: '#ff4500',      // 枠はオレンジレッド
-                fillColor: '#ffd700',  // 塗りは黄金色
+                weight: 1.0,
+                color: '#ff4500', 
+                fillColor: '#ffd700', 
                 fillOpacity: 0.65,
                 fill: true,
                 stroke: true
@@ -295,7 +310,6 @@
         return { weight: 0, opacity: 0, fillOpacity: 0, stroke: false, fill: false };
     };
 
-    // ★魔法★ 同様にどんなレイヤー名が来ても絶対に検索処理を実行させる
     const shubatsuStylesProxy = new Proxy({}, {
         get: function(target, prop) {
             if (typeof prop === 'string' && (prop === 'constructor' || prop === '__proto__')) return undefined;
@@ -308,7 +322,7 @@
         interactive: false, 
         minZoom: 13,
         maxNativeZoom: 16,
-        vectorTileLayerStyles: shubatsuStylesProxy // 魔法のProxyをセット
+        vectorTileLayerStyles: shubatsuStylesProxy 
     });
 
     photo.addTo(map);
@@ -326,7 +340,7 @@
     };
 
     const overlayMaps = {
-        "🪚 主伐適地モード（人工林 40年生以上）": shubatsuMesh
+        "🪚 主伐適地モード（人工林・指定林齢以上）": shubatsuMesh
     };
 
     L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
@@ -364,12 +378,24 @@
         }
     });
 
+    // ★追加★ 都道府県変更機能
     function changePref() {
         const select = document.getElementById("prefSelect");
         const val = select.value.split(","); 
         const lat = parseFloat(val[0]);
         const lon = parseFloat(val[1]);
         map.setView([lat, lon], 10);
+    }
+
+    // ★追加★ 林齢のしきい値を変更した時の機能
+    function changeAgeThreshold() {
+        const select = document.getElementById("ageThresholdSelect");
+        currentAgeThreshold = parseInt(select.value, 10);
+        
+        // 主伐適地レイヤーが表示されている場合のみ、再描画して変更を即座に反映させる
+        if (map.hasLayer(shubatsuMesh)) {
+            shubatsuMesh.redraw();
+        }
     }
 
     const snapshotOptions = {
@@ -405,7 +431,7 @@
         });
         
         if(map.hasLayer(shubatsuMesh)) {
-            activeLayerName = "shubatsu_" + activeLayerName;
+            activeLayerName = `shubatsu${currentAgeThreshold}_` + activeLayerName;
         }
 
         const filename = `${activeLayerName}_${south}_${west}_${north}_${east}.jpg`;
