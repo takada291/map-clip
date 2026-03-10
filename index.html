@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.12</title>
+    <title>地図切出 v3.13</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -36,9 +36,30 @@
 
         select {
             padding: 8px;
-            font-size: 16px;
+            font-size: 15px;
             border-radius: 4px;
             border: 1px solid #ccc;
+        }
+        
+        /* ★追加★ 検索フィルター用のスタイル */
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            background: white;
+            padding: 6px 10px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-size: 15px;
+            font-weight: bold;
+        }
+        .filter-group input {
+            width: 50px;
+            padding: 4px;
+            font-size: 15px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            text-align: right;
         }
         
         .crosshair {
@@ -138,12 +159,23 @@
         <option value="26.212,127.681">沖縄県</option>
     </select>
     
-    <select id="ageThresholdSelect" onchange="changeAgeThreshold()">
-        <option value="40" selected>40年生以上</option>
-        <option value="60">60年生以上</option>
-        <option value="80">80年生以上</option>
-        <option value="100">100年生以上</option>
+    <select id="forestTypeSelect" onchange="updateSearch()">
+        <option value="全部" selected>林種: すべて</option>
+        <option value="人工林">人工林</option>
+        <option value="天然林">天然林</option>
+        <option value="伐採跡地">伐採跡地</option>
+        <option value="未立木地">未立木地</option>
+        <option value="竹林">竹林</option>
+        <option value="その他">その他</option>
     </select>
+    
+    <div class="filter-group">
+        <span>林齢:</span>
+        <input type="number" id="minAge" placeholder="0" onchange="updateSearch()">
+        <span>〜</span>
+        <input type="number" id="maxAge" placeholder="上限" onchange="updateSearch()">
+        <span style="font-size: 13px; font-weight: normal;">年生</span>
+    </div>
     
     <button onclick="downloadMapImageWithExif()">現在表示中の地図を保存(Exif付)</button>
 </div>
@@ -166,8 +198,10 @@
     let startZoom = 15;
     let isJumped = false; 
 
-    // ★追加★ 現在選択されている林齢のしきい値（初期値は40）
-    let currentAgeThreshold = 40;
+    // ★追加★ 検索フィルターのグローバル変数
+    let currentForestType = "全部";
+    let currentMinAge = 0;
+    let currentMaxAge = 999;
 
     if (latParam && lonParam && !isNaN(latParam) && !isNaN(lonParam)) {
         startLat = parseFloat(latParam);
@@ -208,7 +242,6 @@
         maxZoom: 16
     });
 
-    // レイヤー名総当たり用リスト
     const pbfLayerNames = [
         'fr_mesh20m', 'fr_mesh20m_pbf_2025', 'fr_mesh20m_webp_2025', 'fr_mesh20m_2025',
         'fr_mesh', 'mesh', 'mesh20m', 'default', 'layer', 'data'
@@ -266,35 +299,44 @@
 
     const forestMeshGroup = L.layerGroup([forestMeshRaster, forestMeshVector]);
 
-
     // ==========================================
-    // 2. 主伐適地モード（林種＝人工林、かつ指定林齢以上）
+    // 2. カスタム検索モード（UIの設定値で動的にハイライト）
     // ==========================================
-    const shubatsuStyle = function(props) {
-        let isTargetType = false;
+    const customSearchStyle = function(props) {
+        // "全部" の場合は最初から林種クリア扱い
+        let isTargetType = (currentForestType === "全部"); 
         let isTargetAge = false;
+        let foundAgeData = false;
         
         for (let key in props) {
             if (props[key] === null || props[key] === undefined || props[key] === "") continue;
             let k = key.toString();
             let v = props[key].toString();
             
-            // ① 林種に「人工」が含まれるか判定
-            if (k.includes('林種') && v.includes('人工')) {
-                isTargetType = true;
+            // ① 林種の判定
+            if (currentForestType !== "全部" && k.includes('林種')) {
+                if (v.includes(currentForestType)) {
+                    isTargetType = true;
+                }
             }
             
-            // ② 林齢が設定値（currentAgeThreshold）以上か判定
+            // ② 林齢の判定
             if (k.includes('林齢')) {
+                foundAgeData = true;
                 let parsedAge = parseInt(v, 10);
-                // ★修正★ 固定の「40」ではなく、ドロップダウンで選んだ数字を使います
-                if (!isNaN(parsedAge) && parsedAge >= currentAgeThreshold) {
+                if (!isNaN(parsedAge) && parsedAge >= currentMinAge && parsedAge <= currentMaxAge) {
                     isTargetAge = true;
                 }
             }
         }
 
-        // ①と②を両方満たしたメッシュだけ黄金色に塗る
+        // 竹林や伐採跡地など、データ上に林齢が無い場合の救済措置
+        // （ユーザーが下限を未設定＝0にしている場合は、年齢不問とみなしてパスさせる）
+        if (!foundAgeData && currentMinAge <= 0) {
+            isTargetAge = true;
+        }
+
+        // 両方の条件を満たしたメッシュだけ黄金色に塗る
         if (isTargetType && isTargetAge) {
             return {
                 weight: 1.0,
@@ -306,23 +348,23 @@
             };
         }
         
-        // 条件から外れたら完全に透明（見えなくする）
+        // 条件から外れたら完全に透明
         return { weight: 0, opacity: 0, fillOpacity: 0, stroke: false, fill: false };
     };
 
-    const shubatsuStylesProxy = new Proxy({}, {
+    const searchStylesProxy = new Proxy({}, {
         get: function(target, prop) {
             if (typeof prop === 'string' && (prop === 'constructor' || prop === '__proto__')) return undefined;
-            return shubatsuStyle;
+            return customSearchStyle;
         }
     });
 
-    const shubatsuMesh = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
+    const searchMesh = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
         rendererFactory: L.canvas.tile, 
         interactive: false, 
         minZoom: 13,
         maxNativeZoom: 16,
-        vectorTileLayerStyles: shubatsuStylesProxy 
+        vectorTileLayerStyles: searchStylesProxy 
     });
 
     photo.addTo(map);
@@ -339,8 +381,9 @@
         "全国森林資源メッシュ（タップで詳細）": forestMeshGroup
     };
 
+    // レイヤー名称も汎用的に変更
     const overlayMaps = {
-        "🪚 主伐適地モード（人工林・指定林齢以上）": shubatsuMesh
+        "🔍 条件絞り込みモード（上部の設定値でハイライト）": searchMesh
     };
 
     L.control.layers(baseMaps, overlayMaps, { collapsed: false }).addTo(map);
@@ -378,7 +421,6 @@
         }
     });
 
-    // ★追加★ 都道府県変更機能
     function changePref() {
         const select = document.getElementById("prefSelect");
         const val = select.value.split(","); 
@@ -387,14 +429,20 @@
         map.setView([lat, lon], 10);
     }
 
-    // ★追加★ 林齢のしきい値を変更した時の機能
-    function changeAgeThreshold() {
-        const select = document.getElementById("ageThresholdSelect");
-        currentAgeThreshold = parseInt(select.value, 10);
+    // ★追加★ 検索値が入力・変更された時の処理
+    function updateSearch() {
+        const typeSelect = document.getElementById("forestTypeSelect");
+        currentForestType = typeSelect.value;
         
-        // 主伐適地レイヤーが表示されている場合のみ、再描画して変更を即座に反映させる
-        if (map.hasLayer(shubatsuMesh)) {
-            shubatsuMesh.redraw();
+        const minInput = document.getElementById("minAge").value;
+        currentMinAge = minInput === "" ? 0 : parseInt(minInput, 10);
+        
+        const maxInput = document.getElementById("maxAge").value;
+        currentMaxAge = maxInput === "" ? 999 : parseInt(maxInput, 10);
+        
+        // 絞り込みレイヤーが表示されている場合のみ、再描画して変更を即座に反映させる
+        if (map.hasLayer(searchMesh)) {
+            searchMesh.redraw();
         }
     }
 
@@ -430,8 +478,8 @@
             else if(layer === forestMeshGroup || layer === forestMeshRaster) activeLayerName = "mesh";
         });
         
-        if(map.hasLayer(shubatsuMesh)) {
-            activeLayerName = `shubatsu${currentAgeThreshold}_` + activeLayerName;
+        if(map.hasLayer(searchMesh)) {
+            activeLayerName = `search_${currentForestType}_${currentMinAge}-${currentMaxAge}_` + activeLayerName;
         }
 
         const filename = `${activeLayerName}_${south}_${west}_${north}_${east}.jpg`;
