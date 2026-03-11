@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.19</title>
+    <title>地図切出 v3.20</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -103,8 +103,10 @@
             border-radius: 5px;
             box-shadow: 0 0 15px rgba(0,0,0,0.2);
             display: none; 
+            cursor: pointer; /* ★追加★ タップできることを示す */
         }
-        .info.legend h4 { margin: 0 0 5px 0; font-size: 13px; color: #004d26; border-bottom: 1px solid #ccc; }
+        /* ★変更★ h4の下線は開いた時だけ出すようにインラインで制御します */
+        .info.legend h4 { margin: 0; font-size: 13px; color: #004d26; }
         .info.legend i {
             width: 16px;
             height: 16px;
@@ -239,9 +241,6 @@
         document.querySelector('.crosshair').style.display = 'none';
     }
 
-    // ==========================================
-    // ★新システム★ HeartRails Geo API を使った完璧な住所取得
-    // ==========================================
     function updateAddressDisplay() {
         const center = map.getCenter();
         const lat = center.lat;
@@ -250,13 +249,11 @@
         const latStr = lat.toFixed(5);
         const lonStr = lon.toFixed(5);
 
-        // 無料・無登録で使える強力な国産逆ジオコーディングAPIを利用
         fetch(`https://geoapi.heartrails.com/api/json?method=searchByGeoLocation&x=${lon}&y=${lat}`)
             .then(response => response.json())
             .then(data => {
                 if (data && data.response && data.response.location && data.response.location.length > 0) {
                     const loc = data.response.location[0];
-                    // 都道府県 + 市区町村 + 町域 を合体！
                     const fullAddress = `${loc.prefecture}${loc.city}${loc.town}`;
                     document.getElementById('addressDisplay').innerText = `📍 ${fullAddress} (緯度:${latStr}, 経度:${lonStr})`;
                 } else {
@@ -288,11 +285,6 @@
         crossOrigin: "anonymous", 
         maxZoom: 16
     });
-
-    const pbfLayerNames = [
-        'fr_mesh20m', 'fr_mesh20m_pbf_2025', 'fr_mesh20m_webp_2025', 'fr_mesh20m_2025',
-        'fr_mesh', 'mesh', 'mesh20m', 'default', 'layer', 'data'
-    ];
 
     const forestMeshRaster = L.tileLayer('https://rinya-tiles.geospatial.jp/fr_mesh20m_webp_2025/{z}/{x}/{y}.webp', {
         attribution: '林野庁 全国森林資源メッシュ',
@@ -413,10 +405,25 @@
 
     L.control.layers(baseMaps, overlayMaps, { collapsed: true }).addTo(map);
 
+    // ==========================================
+    // ★大改造★ 樹種の色調（凡例）の折りたたみ機能
+    // ==========================================
     const legend = L.control({position: 'bottomleft'});
     legend.onAdd = function (map) {
         const div = L.DomUtil.create('div', 'info legend');
-        div.innerHTML += '<h4>🌲 樹種の色調</h4>';
+        
+        // ★重要★ 凡例をタップした時に、裏の地図がクリックされるのを防ぐ
+        L.DomEvent.disableClickPropagation(div);
+
+        // 展開時のHTML構造を作成
+        let html = `
+            <div id="legendHeader" style="display: flex; justify-content: space-between; align-items: center;">
+                <h4 style="margin: 0; font-size: 13px; color: #004d26;">🌲 樹種の色調</h4>
+                <span id="legendToggleIcon" style="font-size: 16px; font-weight: bold; color: #007bff; margin-left: 15px;">[+]</span>
+            </div>
+            <div id="legendContent" style="display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid #ccc;">
+        `;
+        
         const categories = [
             { color: 'rgb(255, 75, 0)', label: 'スギ' },
             { color: 'rgb(77, 196, 255)', label: 'ヒノキ類' },
@@ -429,10 +436,28 @@
             { color: 'rgb(255, 202, 191)', label: 'タケ' },
             { color: 'rgb(191, 191, 191)', label: '混交林・伐採跡地等' }
         ];
+        
         for (let i = 0; i < categories.length; i++) {
-            div.innerHTML += '<i style="background:' + categories[i].color + '"></i> ' + categories[i].label + '<br>';
+            html += '<i style="background:' + categories[i].color + '"></i> ' + categories[i].label + '<br>';
         }
-        div.innerHTML += '<div style="margin-top: 8px; font-size: 10px; color: #666; line-height: 1.2;">※タップでの詳細表示は<br>地図拡大時のみ有効です</div>';
+        html += '<div style="margin-top: 8px; font-size: 10px; color: #666; line-height: 1.2;">※タップでの詳細表示は<br>地図拡大時のみ有効です</div>';
+        html += '</div>';
+        
+        div.innerHTML = html;
+        
+        // ★追加★ タップ（クリック）で開閉する機能
+        div.onclick = function() {
+            const content = document.getElementById('legendContent');
+            const icon = document.getElementById('legendToggleIcon');
+            if (content.style.display === 'none') {
+                content.style.display = 'block'; // 開く
+                icon.innerText = '[-]';
+            } else {
+                content.style.display = 'none';  // 閉じる
+                icon.innerText = '[+]';
+            }
+        };
+
         return div;
     };
     legend.addTo(map);
