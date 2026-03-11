@@ -2,12 +2,10 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.17</title>
+    <title>地図切出 v3.18</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    
-    <script src="https://maps.gsi.go.jp/js/muni.js"></script>
     
     <style>
         body { margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
@@ -217,6 +215,9 @@
     let currentForestType = "全部";
     let currentMinAge = 0;
     let currentMaxAge = 999;
+    
+    // ★大改造★ 市町村名辞書を保持するグローバル変数
+    let muniDict = {};
 
     if (latParam && lonParam && !isNaN(latParam) && !isNaN(lonParam)) {
         startLat = parseFloat(latParam);
@@ -242,7 +243,22 @@
     }
 
     // ==========================================
-    // ★大修正★ 住所・緯度経度のリアルタイム表示
+    // ★大改造★ 国土地理院の辞書データをテキストとして確実に取得する
+    // ==========================================
+    fetch('https://mreversegeocoder.gsi.go.jp/reverse-geocoder/Data/muni.js')
+        .then(response => response.text())
+        .then(text => {
+            // テキストの中からJSON部分（{}で囲まれた部分）を切り抜いてパースする
+            const match = text.match(/GSI\.MUNI_ARRAY\s*=\s*(\{.*?\});/s);
+            if (match && match[1]) {
+                muniDict = JSON.parse(match[1]);
+                updateAddressDisplay(); // 辞書が完成したら住所を再描画
+            }
+        })
+        .catch(err => console.error("市町村辞書の取得に失敗:", err));
+
+    // ==========================================
+    // 住所・緯度経度のリアルタイム表示
     // ==========================================
     function updateAddressDisplay() {
         const center = map.getCenter();
@@ -257,21 +273,17 @@
             .then(data => {
                 let displayStr = "";
                 if (data && data.results && data.results.muniCd) {
-                    const rawMuniCd = data.results.muniCd; // 例："18201" や "01101"
+                    // コードを確実に5桁にする
+                    const muniCd = String(data.results.muniCd).padStart(5, '0');
                     const lv01Nm = data.results.lv01Nm || '';
                     let muniName = '';
                     
-                    if (typeof GSI !== 'undefined' && GSI.MUNI_ARRAY) {
-                        // 辞書のキー仕様ブレ（ゼロ埋め有無）に対応するため両方で検索
-                        const val = GSI.MUNI_ARRAY[String(rawMuniCd)] || GSI.MUNI_ARRAY[String(Number(rawMuniCd))];
-                        
-                        if (val) {
-                            // val の中身は "18,福井県,18201,福井市" のようになっている
-                            const parts = val.split(',');
-                            if (parts.length >= 4) {
-                                // 都道府県(parts[1])と市区町村(parts[3])を結合（不要なスペースを除去）
-                                muniName = (parts[1] + parts[3]).replace(/\s+/g, '');
-                            }
+                    // 自前で取得した辞書（muniDict）から検索
+                    if (muniDict[muniCd]) {
+                        const parts = muniDict[muniCd].split(',');
+                        if (parts.length >= 4) {
+                            // 都道府県名(parts[1])と市区町村名(parts[3])を繋げる
+                            muniName = parts[1] + parts[3];
                         }
                     }
                     
@@ -288,7 +300,7 @@
     }
 
     map.on('moveend', updateAddressDisplay);
-    setTimeout(updateAddressDisplay, 1000); 
+    updateAddressDisplay(); // 初期表示
 
 
     const opt = { attribution: '地理院タイル', crossOrigin: "anonymous", maxZoom: 18 };
