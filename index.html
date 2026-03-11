@@ -2,10 +2,11 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.13</title>
+    <title>地図切出 v3.15</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://mreversegeocoder.gsi.go.jp/reverse-geocoder/Data/muni.js"></script>
     
     <style>
         body { margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
@@ -41,7 +42,6 @@
             border: 1px solid #ccc;
         }
         
-        /* ★追加★ 検索フィルター用のスタイル */
         .filter-group {
             display: flex;
             align-items: center;
@@ -60,6 +60,20 @@
             border: 1px solid #ccc;
             border-radius: 3px;
             text-align: right;
+        }
+        
+        /* 住所＆座標表示エリアのスタイル */
+        #addressDisplay {
+            margin-left: auto;
+            font-size: 13px; /* 座標が入って長くなるので少しだけ文字を小さく調整 */
+            font-weight: bold;
+            color: #004d26;
+            background: #fff;
+            padding: 6px 12px;
+            border-radius: 12px;
+            border: 1px solid #ccc;
+            box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+            white-space: nowrap; /* 折り返し防止 */
         }
         
         .crosshair {
@@ -178,6 +192,8 @@
     </div>
     
     <button onclick="downloadMapImageWithExif()">現在表示中の地図を保存(Exif付)</button>
+
+    <div id="addressDisplay">📍 座標取得中...</div>
 </div>
 
 <div class="crosshair"></div>
@@ -198,7 +214,6 @@
     let startZoom = 15;
     let isJumped = false; 
 
-    // ★追加★ 検索フィルターのグローバル変数
     let currentForestType = "全部";
     let currentMinAge = 0;
     let currentMaxAge = 999;
@@ -226,6 +241,47 @@
         document.querySelector('.crosshair').style.display = 'none';
     }
 
+    // ==========================================
+    // 住所・緯度経度のリアルタイム表示
+    // ==========================================
+    function updateAddressDisplay() {
+        const center = map.getCenter();
+        const lat = center.lat;
+        const lon = center.lng;
+        
+        // ★追加★ 緯度経度を実用的な5桁（約1m精度）に丸める
+        const latStr = lat.toFixed(5);
+        const lonStr = lon.toFixed(5);
+
+        fetch(`https://mreversegeocoder.gsi.go.jp/reverse-geocoder/LonLatToAddress?lat=${lat}&lon=${lon}`)
+            .then(response => response.json())
+            .then(data => {
+                let displayStr = "";
+                if (data && data.results && data.results.muniCd) {
+                    const muniCd = data.results.muniCd;
+                    const lv01Nm = data.results.lv01Nm || '';
+                    let muniName = '';
+                    
+                    if (typeof GSI !== 'undefined' && GSI.MUNI_ARRAY && GSI.MUNI_ARRAY[muniCd]) {
+                        muniName = GSI.MUNI_ARRAY[muniCd].replace(',', '');
+                    }
+                    // ★変更★ 住所の後ろに緯度経度をくっつける
+                    displayStr = `📍 ${muniName}${lv01Nm} (緯度:${latStr}, 経度:${lonStr})`;
+                } else {
+                    displayStr = `📍 山間部等 (緯度:${latStr}, 経度:${lonStr})`;
+                }
+                document.getElementById('addressDisplay').innerText = displayStr;
+            })
+            .catch(error => {
+                console.error("地名取得エラー:", error);
+                document.getElementById('addressDisplay').innerText = `📍 緯度:${latStr}, 経度:${lonStr}`;
+            });
+    }
+
+    map.on('moveend', updateAddressDisplay);
+    updateAddressDisplay();
+
+
     const opt = { attribution: '地理院タイル', crossOrigin: "anonymous", maxZoom: 18 };
     const optEsri = { attribution: 'Esri World Imagery', crossOrigin: "anonymous", maxZoom: 18 };
 
@@ -247,24 +303,13 @@
         'fr_mesh', 'mesh', 'mesh20m', 'default', 'layer', 'data'
     ];
 
-    // ==========================================
-    // 1. 通常の森林資源メッシュ (ラスタ + タップ用細線ベクタ)
-    // ==========================================
     const forestMeshRaster = L.tileLayer('https://rinya-tiles.geospatial.jp/fr_mesh20m_webp_2025/{z}/{x}/{y}.webp', {
         attribution: '林野庁 全国森林資源メッシュ',
         crossOrigin: "anonymous", 
         maxZoom: 16
     });
 
-    const meshHitStyle = { 
-        weight: 0.5, 
-        color: '#3388ff', 
-        opacity: 0.4, 
-        fillColor: '#ffffff', 
-        fillOpacity: 0.01, 
-        fill: true, 
-        stroke: true 
-    };
+    const meshHitStyle = { weight: 0.5, color: '#3388ff', opacity: 0.4, fillColor: '#ffffff', fillOpacity: 0.01, fill: true, stroke: true };
 
     const normalStylesProxy = new Proxy({}, {
         get: function(target, prop) {
@@ -299,11 +344,7 @@
 
     const forestMeshGroup = L.layerGroup([forestMeshRaster, forestMeshVector]);
 
-    // ==========================================
-    // 2. カスタム検索モード（UIの設定値で動的にハイライト）
-    // ==========================================
     const customSearchStyle = function(props) {
-        // "全部" の場合は最初から林種クリア扱い
         let isTargetType = (currentForestType === "全部"); 
         let isTargetAge = false;
         let foundAgeData = false;
@@ -313,14 +354,12 @@
             let k = key.toString();
             let v = props[key].toString();
             
-            // ① 林種の判定
             if (currentForestType !== "全部" && k.includes('林種')) {
                 if (v.includes(currentForestType)) {
                     isTargetType = true;
                 }
             }
             
-            // ② 林齢の判定
             if (k.includes('林齢')) {
                 foundAgeData = true;
                 let parsedAge = parseInt(v, 10);
@@ -330,13 +369,10 @@
             }
         }
 
-        // 竹林や伐採跡地など、データ上に林齢が無い場合の救済措置
-        // （ユーザーが下限を未設定＝0にしている場合は、年齢不問とみなしてパスさせる）
         if (!foundAgeData && currentMinAge <= 0) {
             isTargetAge = true;
         }
 
-        // 両方の条件を満たしたメッシュだけ黄金色に塗る
         if (isTargetType && isTargetAge) {
             return {
                 weight: 1.0,
@@ -348,7 +384,6 @@
             };
         }
         
-        // 条件から外れたら完全に透明
         return { weight: 0, opacity: 0, fillOpacity: 0, stroke: false, fill: false };
     };
 
@@ -381,7 +416,6 @@
         "全国森林資源メッシュ（タップで詳細）": forestMeshGroup
     };
 
-    // レイヤー名称も汎用的に変更
     const overlayMaps = {
         "🔍 条件絞り込みモード（上部の設定値でハイライト）": searchMesh
     };
@@ -429,7 +463,6 @@
         map.setView([lat, lon], 10);
     }
 
-    // ★追加★ 検索値が入力・変更された時の処理
     function updateSearch() {
         const typeSelect = document.getElementById("forestTypeSelect");
         currentForestType = typeSelect.value;
@@ -440,7 +473,6 @@
         const maxInput = document.getElementById("maxAge").value;
         currentMaxAge = maxInput === "" ? 999 : parseInt(maxInput, 10);
         
-        // 絞り込みレイヤーが表示されている場合のみ、再描画して変更を即座に反映させる
         if (map.hasLayer(searchMesh)) {
             searchMesh.redraw();
         }
@@ -452,7 +484,8 @@
             ".leaflet-dont-include-pane",
             "#controls",
             ".crosshair",
-            ".info.legend"
+            ".info.legend",
+            "#addressDisplay" 
         ],
         mimeType: "image/jpeg"
     };
