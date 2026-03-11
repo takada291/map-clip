@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.18</title>
+    <title>地図切出 v3.19</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -215,9 +215,6 @@
     let currentForestType = "全部";
     let currentMinAge = 0;
     let currentMaxAge = 999;
-    
-    // ★大改造★ 市町村名辞書を保持するグローバル変数
-    let muniDict = {};
 
     if (latParam && lonParam && !isNaN(latParam) && !isNaN(lonParam)) {
         startLat = parseFloat(latParam);
@@ -243,22 +240,7 @@
     }
 
     // ==========================================
-    // ★大改造★ 国土地理院の辞書データをテキストとして確実に取得する
-    // ==========================================
-    fetch('https://mreversegeocoder.gsi.go.jp/reverse-geocoder/Data/muni.js')
-        .then(response => response.text())
-        .then(text => {
-            // テキストの中からJSON部分（{}で囲まれた部分）を切り抜いてパースする
-            const match = text.match(/GSI\.MUNI_ARRAY\s*=\s*(\{.*?\});/s);
-            if (match && match[1]) {
-                muniDict = JSON.parse(match[1]);
-                updateAddressDisplay(); // 辞書が完成したら住所を再描画
-            }
-        })
-        .catch(err => console.error("市町村辞書の取得に失敗:", err));
-
-    // ==========================================
-    // 住所・緯度経度のリアルタイム表示
+    // ★新システム★ HeartRails Geo API を使った完璧な住所取得
     // ==========================================
     function updateAddressDisplay() {
         const center = map.getCenter();
@@ -268,30 +250,18 @@
         const latStr = lat.toFixed(5);
         const lonStr = lon.toFixed(5);
 
-        fetch(`https://mreversegeocoder.gsi.go.jp/reverse-geocoder/LonLatToAddress?lat=${lat}&lon=${lon}`)
+        // 無料・無登録で使える強力な国産逆ジオコーディングAPIを利用
+        fetch(`https://geoapi.heartrails.com/api/json?method=searchByGeoLocation&x=${lon}&y=${lat}`)
             .then(response => response.json())
             .then(data => {
-                let displayStr = "";
-                if (data && data.results && data.results.muniCd) {
-                    // コードを確実に5桁にする
-                    const muniCd = String(data.results.muniCd).padStart(5, '0');
-                    const lv01Nm = data.results.lv01Nm || '';
-                    let muniName = '';
-                    
-                    // 自前で取得した辞書（muniDict）から検索
-                    if (muniDict[muniCd]) {
-                        const parts = muniDict[muniCd].split(',');
-                        if (parts.length >= 4) {
-                            // 都道府県名(parts[1])と市区町村名(parts[3])を繋げる
-                            muniName = parts[1] + parts[3];
-                        }
-                    }
-                    
-                    displayStr = `📍 ${muniName}${lv01Nm} (緯度:${latStr}, 経度:${lonStr})`;
+                if (data && data.response && data.response.location && data.response.location.length > 0) {
+                    const loc = data.response.location[0];
+                    // 都道府県 + 市区町村 + 町域 を合体！
+                    const fullAddress = `${loc.prefecture}${loc.city}${loc.town}`;
+                    document.getElementById('addressDisplay').innerText = `📍 ${fullAddress} (緯度:${latStr}, 経度:${lonStr})`;
                 } else {
-                    displayStr = `📍 山間部等 (緯度:${latStr}, 経度:${lonStr})`;
+                    document.getElementById('addressDisplay').innerText = `📍 山間部等 (緯度:${latStr}, 経度:${lonStr})`;
                 }
-                document.getElementById('addressDisplay').innerText = displayStr;
             })
             .catch(error => {
                 console.error("地名取得エラー:", error);
@@ -300,7 +270,7 @@
     }
 
     map.on('moveend', updateAddressDisplay);
-    updateAddressDisplay(); // 初期表示
+    updateAddressDisplay(); 
 
 
     const opt = { attribution: '地理院タイル', crossOrigin: "anonymous", maxZoom: 18 };
