@@ -2,12 +2,12 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.16</title>
+    <title>地図切出 v3.17</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     
-    <script src="https://mreversegeocoder.gsi.go.jp/reverse-geocoder/Data/muni.js"></script>
+    <script src="https://maps.gsi.go.jp/js/muni.js"></script>
     
     <style>
         body { margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; }
@@ -63,7 +63,6 @@
             text-align: right;
         }
         
-        /* 住所＆座標表示エリア */
         #addressDisplay {
             margin-left: auto;
             font-size: 13px; 
@@ -243,7 +242,7 @@
     }
 
     // ==========================================
-    // ★強化版★ 住所・緯度経度のリアルタイム表示
+    // ★大修正★ 住所・緯度経度のリアルタイム表示
     // ==========================================
     function updateAddressDisplay() {
         const center = map.getCenter();
@@ -258,15 +257,22 @@
             .then(data => {
                 let displayStr = "";
                 if (data && data.results && data.results.muniCd) {
-                    // コードを確実に5桁のゼロ埋め文字列にする（例: 北海道は 01101）
-                    const muniCd = String(data.results.muniCd).padStart(5, '0');
+                    const rawMuniCd = data.results.muniCd; // 例："18201" や "01101"
                     const lv01Nm = data.results.lv01Nm || '';
                     let muniName = '';
                     
-                    // 辞書から都道府県・市町村名を取得して結合
-                    if (typeof GSI !== 'undefined' && GSI.MUNI_ARRAY && GSI.MUNI_ARRAY[muniCd]) {
-                        // "福井県,福井市" を "福井県福井市" に変換
-                        muniName = GSI.MUNI_ARRAY[muniCd].split(',').join('');
+                    if (typeof GSI !== 'undefined' && GSI.MUNI_ARRAY) {
+                        // 辞書のキー仕様ブレ（ゼロ埋め有無）に対応するため両方で検索
+                        const val = GSI.MUNI_ARRAY[String(rawMuniCd)] || GSI.MUNI_ARRAY[String(Number(rawMuniCd))];
+                        
+                        if (val) {
+                            // val の中身は "18,福井県,18201,福井市" のようになっている
+                            const parts = val.split(',');
+                            if (parts.length >= 4) {
+                                // 都道府県(parts[1])と市区町村(parts[3])を結合（不要なスペースを除去）
+                                muniName = (parts[1] + parts[3]).replace(/\s+/g, '');
+                            }
+                        }
                     }
                     
                     displayStr = `📍 ${muniName}${lv01Nm} (緯度:${latStr}, 経度:${lonStr})`;
@@ -281,9 +287,8 @@
             });
     }
 
-    // 初回と移動後に確実に実行
     map.on('moveend', updateAddressDisplay);
-    setTimeout(updateAddressDisplay, 1000); // 辞書の読み込み待ちを考慮して1秒後にも実行
+    setTimeout(updateAddressDisplay, 1000); 
 
 
     const opt = { attribution: '地理院タイル', crossOrigin: "anonymous", maxZoom: 18 };
@@ -424,10 +429,6 @@
         "🔍 条件絞り込みモード（上部の設定値でハイライト）": searchMesh
     };
 
-    // ==========================================
-    // ★大改善★ スマホ向けにレイヤーメニューを折りたたみ！
-    // collapsed: true にすることで、スマートなアイコン化を実現！
-    // ==========================================
     L.control.layers(baseMaps, overlayMaps, { collapsed: true }).addTo(map);
 
     const legend = L.control({position: 'bottomleft'});
