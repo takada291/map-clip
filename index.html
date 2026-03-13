@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.20</title>
+    <title>地図切出 v3.21</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -71,7 +71,10 @@
             border-radius: 12px;
             border: 1px solid #ccc;
             box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
-            white-space: nowrap; 
+            /* ★変更★ 情報が増えたのでスマホ画面からはみ出さないよう調整 */
+            white-space: nowrap;
+            overflow-x: auto;
+            max-width: 100%;
         }
         
         .crosshair {
@@ -103,9 +106,8 @@
             border-radius: 5px;
             box-shadow: 0 0 15px rgba(0,0,0,0.2);
             display: none; 
-            cursor: pointer; /* ★追加★ タップできることを示す */
+            cursor: pointer;
         }
-        /* ★変更★ h4の下線は開いた時だけ出すようにインラインで制御します */
         .info.legend h4 { margin: 0; font-size: 13px; color: #004d26; }
         .info.legend i {
             width: 16px;
@@ -193,7 +195,7 @@
     
     <button onclick="downloadMapImageWithExif()">現在表示中の地図を保存(Exif付)</button>
 
-    <div id="addressDisplay">📍 座標取得中...</div>
+    <div id="addressDisplay">📍 情報取得中...</div>
 </div>
 
 <div class="crosshair"></div>
@@ -241,6 +243,9 @@
         document.querySelector('.crosshair').style.display = 'none';
     }
 
+    // ==========================================
+    // ★大進化★ 住所 ＋ 標高 ＋ 緯度経度 の同時取得
+    // ==========================================
     function updateAddressDisplay() {
         const center = map.getCenter();
         const lat = center.lat;
@@ -249,21 +254,40 @@
         const latStr = lat.toFixed(5);
         const lonStr = lon.toFixed(5);
 
-        fetch(`https://geoapi.heartrails.com/api/json?method=searchByGeoLocation&x=${lon}&y=${lat}`)
+        document.getElementById('addressDisplay').innerText = `📍 情報取得中...`;
+
+        // 1. 住所取得のAPI通信
+        const addressPromise = fetch(`https://geoapi.heartrails.com/api/json?method=searchByGeoLocation&x=${lon}&y=${lat}`)
             .then(response => response.json())
-            .then(data => {
-                if (data && data.response && data.response.location && data.response.location.length > 0) {
-                    const loc = data.response.location[0];
-                    const fullAddress = `${loc.prefecture}${loc.city}${loc.town}`;
-                    document.getElementById('addressDisplay').innerText = `📍 ${fullAddress} (緯度:${latStr}, 経度:${lonStr})`;
-                } else {
-                    document.getElementById('addressDisplay').innerText = `📍 山間部等 (緯度:${latStr}, 経度:${lonStr})`;
-                }
-            })
-            .catch(error => {
-                console.error("地名取得エラー:", error);
-                document.getElementById('addressDisplay').innerText = `📍 緯度:${latStr}, 経度:${lonStr}`;
-            });
+            .catch(() => null);
+
+        // 2. 標高取得のAPI通信 (国土地理院 標高API)
+        const elevPromise = fetch(`https://cyberjapandata2.gsi.go.jp/general/dem/scripts/getelevation.php?lon=${lon}&lat=${lat}&outtype=JSON`)
+            .then(response => response.json())
+            .catch(() => null);
+
+        // 2つのデータが両方揃うまで待ってから表示する
+        Promise.all([addressPromise, elevPromise]).then(results => {
+            const addressData = results[0];
+            const elevData = results[1];
+
+            // 住所の整理
+            let addressStr = "山間部等";
+            if (addressData && addressData.response && addressData.response.location && addressData.response.location.length > 0) {
+                const loc = addressData.response.location[0];
+                addressStr = `${loc.prefecture}${loc.city}${loc.town}`;
+            }
+
+            // 標高の整理 (海域などデータがない場所は "----" が返ってくるので弾く)
+            let elevStr = "不明";
+            if (elevData && elevData.elevation !== undefined && elevData.elevation !== "----") {
+                // 標高は小数点第1位までに丸める
+                elevStr = parseFloat(elevData.elevation).toFixed(1) + "m";
+            }
+
+            // 林業で重要な「標高」を住所のすぐ横に配置
+            document.getElementById('addressDisplay').innerText = `📍 ${addressStr} (標高:${elevStr} / 緯度:${latStr}, 経度:${lonStr})`;
+        });
     }
 
     map.on('moveend', updateAddressDisplay);
@@ -405,17 +429,11 @@
 
     L.control.layers(baseMaps, overlayMaps, { collapsed: true }).addTo(map);
 
-    // ==========================================
-    // ★大改造★ 樹種の色調（凡例）の折りたたみ機能
-    // ==========================================
     const legend = L.control({position: 'bottomleft'});
     legend.onAdd = function (map) {
         const div = L.DomUtil.create('div', 'info legend');
-        
-        // ★重要★ 凡例をタップした時に、裏の地図がクリックされるのを防ぐ
         L.DomEvent.disableClickPropagation(div);
 
-        // 展開時のHTML構造を作成
         let html = `
             <div id="legendHeader" style="display: flex; justify-content: space-between; align-items: center;">
                 <h4 style="margin: 0; font-size: 13px; color: #004d26;">🌲 樹種の色調</h4>
@@ -445,15 +463,14 @@
         
         div.innerHTML = html;
         
-        // ★追加★ タップ（クリック）で開閉する機能
         div.onclick = function() {
             const content = document.getElementById('legendContent');
             const icon = document.getElementById('legendToggleIcon');
             if (content.style.display === 'none') {
-                content.style.display = 'block'; // 開く
+                content.style.display = 'block'; 
                 icon.innerText = '[-]';
             } else {
-                content.style.display = 'none';  // 閉じる
+                content.style.display = 'none';  
                 icon.innerText = '[+]';
             }
         };
