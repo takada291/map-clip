@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.21</title>
+    <title>地図切出 v3.22</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -71,7 +71,6 @@
             border-radius: 12px;
             border: 1px solid #ccc;
             box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
-            /* ★変更★ 情報が増えたのでスマホ画面からはみ出さないよう調整 */
             white-space: nowrap;
             overflow-x: auto;
             max-width: 100%;
@@ -193,7 +192,7 @@
         <span style="font-size: 13px; font-weight: normal;">年生</span>
     </div>
     
-    <button onclick="downloadMapImageWithExif()">現在表示中の地図を保存(Exif付)</button>
+    <button onclick="downloadMapImageWithExif()">現在表示中の地図を保存</button>
 
     <div id="addressDisplay">📍 情報取得中...</div>
 </div>
@@ -207,6 +206,11 @@
 <script src="https://unpkg.com/leaflet.vectorgrid@1.3.0/dist/Leaflet.VectorGrid.bundled.js"></script>
 
 <script>
+    // ==========================================
+    // ★重要★ 取得したインスタンスIDをここに貼り付けてください！
+    // ==========================================
+    const INSTANCE_ID = "c4013cea-2cf9-4011-8915-47a5efb06b75"; 
+
     const urlParams = new URLSearchParams(window.location.search);
     const latParam = urlParams.get('lat');
     const lonParam = urlParams.get('lon');
@@ -243,9 +247,6 @@
         document.querySelector('.crosshair').style.display = 'none';
     }
 
-    // ==========================================
-    // ★大進化★ 住所 ＋ 標高 ＋ 緯度経度 の同時取得
-    // ==========================================
     function updateAddressDisplay() {
         const center = map.getCenter();
         const lat = center.lat;
@@ -256,43 +257,35 @@
 
         document.getElementById('addressDisplay').innerText = `📍 情報取得中...`;
 
-        // 1. 住所取得のAPI通信
         const addressPromise = fetch(`https://geoapi.heartrails.com/api/json?method=searchByGeoLocation&x=${lon}&y=${lat}`)
             .then(response => response.json())
             .catch(() => null);
 
-        // 2. 標高取得のAPI通信 (国土地理院 標高API)
         const elevPromise = fetch(`https://cyberjapandata2.gsi.go.jp/general/dem/scripts/getelevation.php?lon=${lon}&lat=${lat}&outtype=JSON`)
             .then(response => response.json())
             .catch(() => null);
 
-        // 2つのデータが両方揃うまで待ってから表示する
         Promise.all([addressPromise, elevPromise]).then(results => {
             const addressData = results[0];
             const elevData = results[1];
 
-            // 住所の整理
             let addressStr = "山間部等";
             if (addressData && addressData.response && addressData.response.location && addressData.response.location.length > 0) {
                 const loc = addressData.response.location[0];
                 addressStr = `${loc.prefecture}${loc.city}${loc.town}`;
             }
 
-            // 標高の整理 (海域などデータがない場所は "----" が返ってくるので弾く)
             let elevStr = "不明";
             if (elevData && elevData.elevation !== undefined && elevData.elevation !== "----") {
-                // 標高は小数点第1位までに丸める
                 elevStr = parseFloat(elevData.elevation).toFixed(1) + "m";
             }
 
-            // 林業で重要な「標高」を住所のすぐ横に配置
             document.getElementById('addressDisplay').innerText = `📍 ${addressStr} (標高:${elevStr} / 緯度:${latStr}, 経度:${lonStr})`;
         });
     }
 
     map.on('moveend', updateAddressDisplay);
     updateAddressDisplay(); 
-
 
     const opt = { attribution: '地理院タイル', crossOrigin: "anonymous", maxZoom: 18 };
     const optEsri = { attribution: 'Esri World Imagery', crossOrigin: "anonymous", maxZoom: 18 };
@@ -350,6 +343,26 @@
     });
 
     const forestMeshGroup = L.layerGroup([forestMeshRaster, forestMeshVector]);
+
+    // ==========================================
+    // ★大追加★ SAR衛星の変化抽出レイヤー
+    // ==========================================
+    // 今日の日付と、1年前の日付を自動計算してAPIに投げる
+    const today = new Date();
+    const oneYearAgo = new Date();
+    oneYearAgo.setFullYear(today.getFullYear() - 1);
+    const formatDate = (d) => d.toISOString().split('T')[0];
+    const timeRange = `${formatDate(oneYearAgo)}/${formatDate(today)}`;
+
+    const sarChangeLayer = L.tileLayer.wms(`https://sh.dataspace.copernicus.eu/ogc/wms/${INSTANCE_ID}`, {
+        layers: 'SAR-CHANGE', // ダッシュボードで作ったレイヤー名
+        format: 'image/png',
+        transparent: true,
+        time: timeRange,
+        maxZoom: 16,
+        attribution: '&copy; Copernicus Sentinel data'
+    });
+
 
     const customSearchStyle = function(props) {
         let isTargetType = (currentForestType === "全部"); 
@@ -424,7 +437,8 @@
     };
 
     const overlayMaps = {
-        "🔍 条件絞り込みモード（上部の設定値でハイライト）": searchMesh
+        "🔍 条件絞り込みモード（上部の設定値でハイライト）": searchMesh,
+        "🚨 SAR衛星 1年間変化抽出（赤色が伐採・崩壊疑い）": sarChangeLayer // ★追加★
     };
 
     L.control.layers(baseMaps, overlayMaps, { collapsed: true }).addTo(map);
