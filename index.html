@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.22</title>
+    <title>地図切出 v3.23</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -207,7 +207,7 @@
 
 <script>
     // ==========================================
-    // ★重要★ 取得したインスタンスIDをここに貼り付けてください！
+    // ★重要★ ここに必ずインスタンスIDを貼り付けてください
     // ==========================================
     const INSTANCE_ID = "c4013cea-2cf9-4011-8915-47a5efb06b75"; 
 
@@ -287,6 +287,7 @@
     map.on('moveend', updateAddressDisplay);
     updateAddressDisplay(); 
 
+
     const opt = { attribution: '地理院タイル', crossOrigin: "anonymous", maxZoom: 18 };
     const optEsri = { attribution: 'Esri World Imagery', crossOrigin: "anonymous", maxZoom: 18 };
 
@@ -345,9 +346,8 @@
     const forestMeshGroup = L.layerGroup([forestMeshRaster, forestMeshVector]);
 
     // ==========================================
-    // ★大追加★ SAR衛星の変化抽出レイヤー
+    // ★修正版★ SAR衛星の変化抽出レイヤー
     // ==========================================
-    // 今日の日付と、1年前の日付を自動計算してAPIに投げる
     const today = new Date();
     const oneYearAgo = new Date();
     oneYearAgo.setFullYear(today.getFullYear() - 1);
@@ -355,10 +355,10 @@
     const timeRange = `${formatDate(oneYearAgo)}/${formatDate(today)}`;
 
     const sarChangeLayer = L.tileLayer.wms(`https://sh.dataspace.copernicus.eu/ogc/wms/${INSTANCE_ID}`, {
-        layers: 'SAR-CHANGE', // ダッシュボードで作ったレイヤー名
+        layers: 'SAR-CHANGE',
         format: 'image/png',
         transparent: true,
-        time: timeRange,
+        TIME: timeRange, // ★ここを大文字に修正！
         maxZoom: 16,
         attribution: '&copy; Copernicus Sentinel data'
     });
@@ -438,7 +438,7 @@
 
     const overlayMaps = {
         "🔍 条件絞り込みモード（上部の設定値でハイライト）": searchMesh,
-        "🚨 SAR衛星 1年間変化抽出（赤色が伐採・崩壊疑い）": sarChangeLayer // ★追加★
+        "🚨 SAR衛星 1年間変化抽出（赤色が伐採・崩壊疑い）": sarChangeLayer
     };
 
     L.control.layers(baseMaps, overlayMaps, { collapsed: true }).addTo(map);
