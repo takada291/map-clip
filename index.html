@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.23</title>
+    <title>地図切出 v3.24</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -345,9 +345,7 @@
 
     const forestMeshGroup = L.layerGroup([forestMeshRaster, forestMeshVector]);
 
-    // ==========================================
-    // ★修正版★ SAR衛星の変化抽出レイヤー
-    // ==========================================
+    // SAR衛星の変化抽出レイヤー
     const today = new Date();
     const oneYearAgo = new Date();
     oneYearAgo.setFullYear(today.getFullYear() - 1);
@@ -358,7 +356,7 @@
         layers: 'SAR-CHANGE',
         format: 'image/png',
         transparent: true,
-        TIME: timeRange, // ★ここを大文字に修正！
+        TIME: timeRange, 
         maxZoom: 16,
         attribution: '&copy; Copernicus Sentinel data'
     });
@@ -438,15 +436,19 @@
 
     const overlayMaps = {
         "🔍 条件絞り込みモード（上部の設定値でハイライト）": searchMesh,
-        "🚨 SAR衛星 1年間変化抽出（赤色が伐採・崩壊疑い）": sarChangeLayer
+        "🚨 SAR衛星 1年間変化抽出（過去と最新の比較）": sarChangeLayer
     };
 
     L.control.layers(baseMaps, overlayMaps, { collapsed: true }).addTo(map);
 
+    // ==========================================
+    // ツリー1: 森林資源メッシュの凡例（左下）
+    // ==========================================
     const legend = L.control({position: 'bottomleft'});
     legend.onAdd = function (map) {
         const div = L.DomUtil.create('div', 'info legend');
         L.DomEvent.disableClickPropagation(div);
+        div.id = 'meshLegendControl'; // IDを付与
 
         let html = `
             <div id="legendHeader" style="display: flex; justify-content: space-between; align-items: center;">
@@ -494,11 +496,62 @@
     legend.addTo(map);
 
     map.on('baselayerchange', function(eventLayer) {
-        const legendElement = document.querySelector('.info.legend');
+        const legendElement = document.getElementById('meshLegendControl');
         if (eventLayer.name.includes("全国森林資源メッシュ")) {
             legendElement.style.display = 'block';
         } else {
             legendElement.style.display = 'none';
+        }
+    });
+
+    // ==========================================
+    // ★新規追加★ ツリー2: SAR画像用の凡例（右下）
+    // ==========================================
+    const sarLegend = L.control({position: 'bottomright'});
+    sarLegend.onAdd = function (map) {
+        const div = L.DomUtil.create('div', 'info legend');
+        L.DomEvent.disableClickPropagation(div);
+        div.id = 'sarLegendControl';
+        div.style.display = 'none'; // 初期状態は非表示
+
+        let html = `
+            <div id="sarLegendHeader" style="display: flex; justify-content: space-between; align-items: center;">
+                <h4 style="margin: 0; font-size: 13px; color: #b30000;">🚨 SAR変化抽出</h4>
+                <span id="sarLegendToggleIcon" style="font-size: 16px; font-weight: bold; color: #007bff; margin-left: 15px;">[+]</span>
+            </div>
+            <div id="sarLegendContent" style="display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid #ccc;">
+                <i style="background: rgba(255, 75, 75, 0.8)"></i> 最近の伐採・崩壊 (赤)<br>
+                <i style="background: rgba(75, 200, 255, 0.8)"></i> 過去の伐採跡・裸地 (水色)<br>
+                <i style="background: rgba(200, 200, 200, 0.8)"></i> 変化なし (白・グレー)<br>
+                <div style="margin-top: 8px; font-size: 10px; color: #666; line-height: 1.2;">※過去1年間の反射強度の<br>変化をRGB合成で可視化</div>
+            </div>
+        `;
+        div.innerHTML = html;
+        
+        div.onclick = function() {
+            const content = document.getElementById('sarLegendContent');
+            const icon = document.getElementById('sarLegendToggleIcon');
+            if (content.style.display === 'none') {
+                content.style.display = 'block'; 
+                icon.innerText = '[-]';
+            } else {
+                content.style.display = 'none';  
+                icon.innerText = '[+]';
+            }
+        };
+        return div;
+    };
+    sarLegend.addTo(map);
+
+    // SARレイヤーのON/OFFに合わせて凡例を表示/非表示する
+    map.on('overlayadd', function(eventLayer) {
+        if (eventLayer.name.includes("SAR衛星")) {
+            document.getElementById('sarLegendControl').style.display = 'block';
+        }
+    });
+    map.on('overlayremove', function(eventLayer) {
+        if (eventLayer.name.includes("SAR衛星")) {
+            document.getElementById('sarLegendControl').style.display = 'none';
         }
     });
 
