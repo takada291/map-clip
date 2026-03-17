@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.24</title>
+    <title>地図切出 v3.25</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -52,13 +52,21 @@
             font-size: 15px;
             font-weight: bold;
         }
-        .filter-group input {
+        .filter-group input[type="number"] {
             width: 50px;
             padding: 4px;
             font-size: 15px;
             border: 1px solid #ccc;
             border-radius: 3px;
             text-align: right;
+        }
+
+        .filter-group input[type="text"] {
+            width: 150px;
+            padding: 4px;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
         }
         
         #addressDisplay {
@@ -174,6 +182,12 @@
         <option value="26.212,127.681">沖縄県</option>
     </select>
     
+    <div class="filter-group">
+        <span>📍</span>
+        <input type="text" id="latLonInput" placeholder="緯度, 経度" onkeypress="handleLatLonEnter(event)">
+        <button onclick="jumpToCoordinates()" style="padding: 4px 10px; font-size: 14px;">移動</button>
+    </div>
+
     <select id="forestTypeSelect" onchange="updateSearch()">
         <option value="全部" selected>林種: すべて</option>
         <option value="人工林">人工林</option>
@@ -206,9 +220,6 @@
 <script src="https://unpkg.com/leaflet.vectorgrid@1.3.0/dist/Leaflet.VectorGrid.bundled.js"></script>
 
 <script>
-    // ==========================================
-    // ★重要★ ここに必ずインスタンスIDを貼り付けてください
-    // ==========================================
     const INSTANCE_ID = "c4013cea-2cf9-4011-8915-47a5efb06b75"; 
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -223,6 +234,7 @@
     let currentForestType = "全部";
     let currentMinAge = 0;
     let currentMaxAge = 999;
+    let searchMarker = null; // ★追加: 検索用ピンの変数
 
     if (latParam && lonParam && !isNaN(latParam) && !isNaN(lonParam)) {
         startLat = parseFloat(latParam);
@@ -243,8 +255,45 @@
     });
 
     if (isJumped) {
-        L.marker([startLat, startLon]).addTo(map).bindPopup('<b>指定された位置</b>').openPopup();
+        searchMarker = L.marker([startLat, startLon]).addTo(map).bindPopup('<b>指定された位置</b>').openPopup();
         document.querySelector('.crosshair').style.display = 'none';
+    }
+
+    // ★新規追加: 緯度経度でジャンプする関数
+    function jumpToCoordinates() {
+        const inputVal = document.getElementById("latLonInput").value;
+        if (!inputVal) return;
+        
+        // カンマやスペースで区切られた数値を抽出
+        const parts = inputVal.replace(/,/g, ' ').trim().split(/\s+/);
+        if (parts.length >= 2) {
+            const lat = parseFloat(parts[0]);
+            const lon = parseFloat(parts[1]);
+            
+            if (!isNaN(lat) && !isNaN(lon)) {
+                map.setView([lat, lon], 16);
+                
+                // 既存のピンがあれば消す
+                if (searchMarker) {
+                    map.removeLayer(searchMarker);
+                }
+                
+                // 新しいピンを立てる
+                searchMarker = L.marker([lat, lon]).addTo(map).bindPopup(`<b>検索位置</b><br>緯度: ${lat}<br>経度: ${lon}`).openPopup();
+                document.querySelector('.crosshair').style.display = 'none';
+            } else {
+                alert("緯度と経度を正しく読み取れませんでした。");
+            }
+        } else {
+            alert("緯度と経度を入力してください（例: 36.065, 136.221）");
+        }
+    }
+
+    // ★新規追加: Enterキーを押した時にも検索を実行する
+    function handleLatLonEnter(event) {
+        if (event.key === 'Enter') {
+            jumpToCoordinates();
+        }
     }
 
     function updateAddressDisplay() {
@@ -286,7 +335,6 @@
 
     map.on('moveend', updateAddressDisplay);
     updateAddressDisplay(); 
-
 
     const opt = { attribution: '地理院タイル', crossOrigin: "anonymous", maxZoom: 18 };
     const optEsri = { attribution: 'Esri World Imagery', crossOrigin: "anonymous", maxZoom: 18 };
