@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.29</title>
+    <title>地図切出 v3.30</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -34,7 +34,6 @@
         }
         button:hover { background-color: #0056b3; }
 
-        /* ★新規追加: 天然更新検索ボタン用のスタイル */
         #btnNaturalUpdate {
             background-color: #28a745;
         }
@@ -406,20 +405,12 @@
         }
     });
     
-    // ★変数に保存して、後でデータを取り出せるようにする
-    let globalMeshLayer = null;
-
     const forestMeshVector = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
         rendererFactory: L.svg.tile,
         interactive: true,
         minZoom: 15,
         maxNativeZoom: 16,
         vectorTileLayerStyles: normalStylesProxy 
-    });
-
-    // 描画されたタイルを保持する
-    forestMeshVector.on('add', function() {
-        globalMeshLayer = this;
     });
 
     forestMeshVector.on('click', function(e) {
@@ -520,11 +511,10 @@
         vectorTileLayerStyles: searchStylesProxy 
     });
 
-    // ★新規追加: 天然更新候補地を表示するための空のレイヤー
     let naturalUpdateLayer = L.geoJSON(null, {
         style: function () {
             return {
-                color: "#00ffff", // 目立つシアン色
+                color: "#00ffff",
                 weight: 2,
                 opacity: 0.8,
                 fillColor: "#00ffff",
@@ -550,7 +540,7 @@
     const overlayMaps = {
         "🔍 条件絞り込みモード（上部の設定値でハイライト）": searchMesh,
         "🚨 SAR衛星 1年間変化抽出（過去と最新の比較）": sarChangeLayer,
-        "🌱 天然更新 候補地（母樹から100m以内の人工林）": naturalUpdateLayer // ★新規追加
+        "🌱 天然更新 候補地（母樹から100m以内の人工林）": naturalUpdateLayer 
     };
 
     L.control.layers(baseMaps, overlayMaps, { collapsed: true }).addTo(map);
@@ -688,26 +678,39 @@
         }
     }
 
-    // ★新規追加: ブラウザ内で「天然林から100m以内の人工林」を計算する激重処理
+    // ★修正版: 天然林から100m以内の人工林を計算する処理
     function calculateNaturalUpdateArea() {
         
-        // ▼▼▼ 修正ポイント：通常メッシュか、絞り込みメッシュか、画面に出ている方を探す ▼▼▼
+        // 1. レイヤーがONになっているかを判定
         let activeMeshLayer = null;
-        if (forestMeshVector && Object.keys(forestMeshVector._vectorTiles || {}).length > 0) {
-            activeMeshLayer = forestMeshVector; // ベースマップのメッシュ
-        } else if (searchMesh && Object.keys(searchMesh._vectorTiles || {}).length > 0) {
-            activeMeshLayer = searchMesh; // 🔍条件絞り込みモードのメッシュ
-        }
+        let isMeshOn = false;
 
-        if (!activeMeshLayer) {
-            alert("メッシュデータが読み込まれていません。\n右上のレイヤー管理（ひし形マーク）から、\n・全国森林資源メッシュ（ベースマップ）\n・🔍 条件絞り込みモード（オーバーレイ）\nのどちらかをオンにしてから実行してください。");
+        // map.eachLayerを使って、現在地図上にあるレイヤーを確実に見つける
+        map.eachLayer(function(layer) {
+            if (layer === searchMesh) {
+                isMeshOn = true;
+                activeMeshLayer = searchMesh;
+            } else if (layer === forestMeshRaster || layer === forestMeshVector) {
+                isMeshOn = true;
+                // ベースマップの場合はVector側のデータを参照する
+                activeMeshLayer = forestMeshVector;
+            }
+        });
+
+        if (!isMeshOn || !activeMeshLayer) {
+            alert("メッシュデータがオンになっていません。\n右上のレイヤー管理（ひし形マーク）から、\n・全国森林資源メッシュ（ベースマップ）\n・🔍 条件絞り込みモード（オーバーレイ）\nのどちらかを選択してください。");
             return;
         }
-        // ▲▲▲ 修正ポイントここまで ▲▲▲
-        
-        // 処理負荷を下げるため、ズームレベル14以上（かなり拡大した状態）でのみ実行を許可
+
+        // 処理負荷を下げるため、ズームレベル14以上でのみ実行を許可
         if (map.getZoom() < 14) {
-            alert("処理が重すぎるため、地図をもっと拡大してから実行してください。");
+            alert("処理が重すぎるため、地図をもっと拡大（ズームイン）してから実行してください。");
+            return;
+        }
+
+        // データが空の場合のエラーハンドリング
+        if (!activeMeshLayer._vectorTiles || Object.keys(activeMeshLayer._vectorTiles).length === 0) {
+            alert("メッシュの読み込みが完了していないか、データが存在しないエリアです。\n数秒待つか、地図を少し動かして再度お試しください。");
             return;
         }
 
@@ -715,16 +718,12 @@
         btn.innerText = "⏳ 計算中...";
         btn.disabled = true;
 
-        // 一旦レイヤーをクリア
         naturalUpdateLayer.clearLayers();
 
-        // 少しだけ時間差を置いてUIが固まらないようにする
         setTimeout(() => {
             let artificialForests = [];
             let naturalForests = [];
 
-            // 画面に描画されているすべてのメッシュ情報を取得
-            // globalMeshLayer を activeMeshLayer に変更
             for (let layerId in activeMeshLayer._vectorTiles) {
                 const tile = activeMeshLayer._vectorTiles[layerId];
                 if(tile && tile._features) {
@@ -757,7 +756,7 @@
                                      
                                      let pt = turf.point([centerLng, centerLat], {
                                          originalProps: feat.properties,
-                                         geometryData: latlngs // 描画用にポリゴン座標を保持
+                                         geometryData: latlngs
                                      });
                                      
                                      if(isArtificial) artificialForests.push(pt);
@@ -770,30 +769,27 @@
             }
 
             if (artificialForests.length === 0 || naturalForests.length === 0) {
-                alert("画面内に「人工林」と「天然林」の両方が見つかりませんでした。");
-                btn.innerText = "🌱 天然更新を検索";
+                alert("画面内に「人工林」と「天然林」の両方が見つかりませんでした。\n天然更新の判定には両方のメッシュが画面に表示されている必要があります。");
+                btn.innerText = "🌱 天然更新候補地を検索";
                 btn.disabled = false;
                 return;
             }
 
-            // 2. 天然林ポイントのコレクションを作成
             const naturalCollection = turf.featureCollection(naturalForests);
             let targetPolygons = [];
 
-            // 3. すべての人工林について、100m以内に天然林があるか総当たり判定
             artificialForests.forEach(af => {
                 const nearest = turf.nearestPoint(af, naturalCollection);
                 const distance = turf.distance(af, nearest, {units: 'kilometers'});
                 
                 if (distance <= 0.1) {
                     let coords = af.properties.geometryData.map(ll => [ll.lng, ll.lat]);
+                    // 最初と最後の座標を一致させて閉じる
                     coords.push([af.properties.geometryData[0].lng, af.properties.geometryData[0].lat]);
-                    
                     targetPolygons.push(turf.polygon([coords]));
                 }
             });
 
-            // 4. 結果を地図に表示
             if (targetPolygons.length > 0) {
                 naturalUpdateLayer.addData(turf.featureCollection(targetPolygons));
                 if (!map.hasLayer(naturalUpdateLayer)) {
@@ -804,7 +800,7 @@
                 alert("100m以内に天然林がある人工林は見つかりませんでした。");
             }
 
-            btn.innerText = "🌱 天然更新を検索";
+            btn.innerText = "🌱 天然更新候補地を検索";
             btn.disabled = false;
 
         }, 100); 
