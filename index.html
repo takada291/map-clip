@@ -255,7 +255,7 @@
     <button onclick="downloadMapImageWithExif()">地図保存</button>
 
     <button id="btnMeasure" onclick="toggleMeasure()">距離計測</button>
-    <button id="btnUndoMeasure" onclick="undoMeasure()">↩ 1つ戻る</button>
+    <button id="btnUndoMeasure" onclick="undoMeasure()">1つ戻る</button>
     <span id="measureResult">総距離: 0 m</span>
 
     <div id="addressDisplay">📍 情報取得中...</div>
@@ -695,14 +695,14 @@
             // 計測開始時に前回の線を自動でクリアする（クリアボタンの統合）
             clearAllMeasure();
             
-            btn.innerText = "📏 計測終了";
+            btn.innerText = "計測終了";
             btn.style.backgroundColor = "#dc3545";
             undoBtn.style.display = "inline-block";
             resText.style.display = "inline-block";
             map.getContainer().style.cursor = 'crosshair';
         } else {
             // 計測終了時は線と結果を残し、カーソルを元に戻す
-            btn.innerText = "📏 距離計測";
+            btn.innerText = "距離計測";
             btn.style.backgroundColor = "#17a2b8";
             undoBtn.style.display = "none";
             map.getContainer().style.cursor = '';
