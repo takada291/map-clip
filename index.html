@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.37</title>
+    <title>地図切出 v3.38</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -150,8 +150,6 @@
             border: 1px solid #999;
             border-radius: 2px;
         }
-        
-        .leaflet-popup-content { margin: 10px; font-size: 12px; }
 
         .leaflet-bottom .leaflet-control-scale {
             position: absolute;
@@ -313,7 +311,6 @@
     // ==========================================
     measureLayerGroup = L.layerGroup().addTo(map);
     
-    // interactive: false で地図クリックを遮らない設定
     measurePolyline = L.polyline([], {
         color: '#dc3545', 
         weight: 4, 
@@ -439,35 +436,13 @@
         }
     });
     
-    // ★安定のピュアなベースメッシュ描画設定
+    // ★メッシュのクリック（インタラクティブ）を無効化
     const forestMeshVector = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
         rendererFactory: L.svg.tile,
-        interactive: true,
+        interactive: false, // タップ判定をオフに変更
         minZoom: 15,
         maxNativeZoom: 16,
         vectorTileLayerStyles: normalStylesProxy 
-    });
-
-    forestMeshVector.on('click', function(e) {
-        // 計測モード中は点を追加してポップアップ処理はスキップ
-        if (isMeasuring) {
-            addMeasurePoint(e.latlng);
-            return;
-        }
-
-        const props = e.layer.properties;
-        if (!props) return;
-
-        let content = '<div style="line-height:1.5; max-height:250px; overflow-y:auto;">';
-        content += '<b style="color:#004d26; border-bottom:1px solid #ccc; display:block; margin-bottom:5px;">🌲 森林資源メッシュ詳細</b>';
-        for (let key in props) {
-            if (props[key] !== null && props[key] !== "Null" && props[key] !== "") {
-                content += `<b>${key}:</b> ${props[key]}<br>`;
-            }
-        }
-        content += '</div>';
-
-        L.popup().setLatLng(e.latlng).setContent(content).openOn(map);
     });
 
     const forestMeshGroup = L.layerGroup([forestMeshRaster, forestMeshVector]);
@@ -544,7 +519,7 @@
         }
     });
 
-    // ★バグの元凶を除去：絞り込みメッシュをCanvas描画（元の超安定版）に戻す
+    // ★絞り込みメッシュもクリック判定をオフ
     const searchMesh = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
         rendererFactory: L.canvas.tile, 
         interactive: false, 
@@ -564,7 +539,7 @@
         "傾斜量図（地形把握）": slope,
         "色別標高図": relief,
         "全国林班図（民有：薄緑、国有：濃緑）": rinpan,
-        "全国森林資源メッシュ（タップで詳細）": forestMeshGroup
+        "全国森林資源メッシュ": forestMeshGroup // メニュー名をシンプルに変更
     };
 
     const overlayMaps = {
@@ -604,7 +579,7 @@
         for (let i = 0; i < categories.length; i++) {
             html += '<i style="background:' + categories[i].color + '"></i> ' + categories[i].label + '<br>';
         }
-        html += '<div style="margin-top: 8px; font-size: 10px; color: #666; line-height: 1.2;">※タップでの詳細表示は<br>地図拡大時のみ有効です</div>';
+        // ★凡例下部の「タップでの詳細表示～」の注釈を削除しました
         html += '</div>';
         
         div.innerHTML = html;
@@ -708,7 +683,7 @@
     }
 
     // ==========================================
-    // 計測ツールのロジック（お化け線対策済み）
+    // 計測ツールのロジック
     // ==========================================
     function toggleMeasure() {
         isMeasuring = !isMeasuring;
@@ -737,15 +712,19 @@
     function clearMeasure() {
         measurePoints = [];
         
-        // 線を空にする
-        measurePolyline.setLatLngs([]);
+        // レイヤーグループの中身（点と線）をすべて完全に削除
+        if (measureLayerGroup) {
+            measureLayerGroup.clearLayers(); 
+        }
         
-        // グループから「線」以外（＝つまり点）を全て個別に削除する
-        measureLayerGroup.eachLayer(function(layer) {
-            if (layer !== measurePolyline) {
-                measureLayerGroup.removeLayer(layer);
-            }
-        });
+        // 新品の透明な線をグループに追加し直す
+        measurePolyline = L.polyline([], {
+            color: '#dc3545', 
+            weight: 4, 
+            dashArray: '8, 8',
+            opacity: 0.8,
+            interactive: false
+        }).addTo(measureLayerGroup);
         
         document.getElementById('measureResult').innerText = "総距離: 0 m";
 
@@ -766,7 +745,6 @@
         measurePoints.push(latlng);
         measurePolyline.setLatLngs(measurePoints);
 
-        // ★点にも interactive: false を付与してクリックの邪魔をさせない
         L.circleMarker(latlng, {
             radius: 5,
             color: '#dc3545',
@@ -791,7 +769,7 @@
         document.getElementById('measureResult').innerText = "総距離: " + distText;
     }
 
-    // 地図の空白部分（メッシュがない場所）をクリックした時
+    // 地図をクリックした時の処理
     map.on('click', function(e) {
         if (!isMeasuring) return;
         addMeasurePoint(e.latlng);
