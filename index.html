@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.38</title>
+    <title>地図切出 v3.39</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -34,11 +34,11 @@
         }
         button:hover { background-color: #0056b3; }
 
-        /* 計測ボタン用のスタイル */
+        /* 計測ボタン用のスタイル（クリアを廃止してUndoを追加） */
         #btnMeasure { background-color: #17a2b8; }
         #btnMeasure:hover { background-color: #138496; }
-        #btnClearMeasure { background-color: #6c757d; display: none; }
-        #btnClearMeasure:hover { background-color: #5a6268; }
+        #btnUndoMeasure { background-color: #ffc107; color: #212529; display: none; }
+        #btnUndoMeasure:hover { background-color: #e0a800; }
 
         #measureResult {
             display: none;
@@ -255,7 +255,7 @@
     <button onclick="downloadMapImageWithExif()">地図を保存</button>
 
     <button id="btnMeasure" onclick="toggleMeasure()">📏 距離計測</button>
-    <button id="btnClearMeasure" onclick="clearMeasure()">✖ クリア</button>
+    <button id="btnUndoMeasure" onclick="undoMeasure()">↩ 1つ戻る</button>
     <span id="measureResult">総距離: 0 m</span>
 
     <div id="addressDisplay">📍 情報取得中...</div>
@@ -277,6 +277,7 @@
     // ==========================================
     let isMeasuring = false;
     let measurePoints = [];
+    let measureMarkers = []; // Undo用にマーカー（点）を記録しておく配列
     let measureLayerGroup;
     let measurePolyline;
 
@@ -436,10 +437,10 @@
         }
     });
     
-    // ★メッシュのクリック（インタラクティブ）を無効化
+    // ★安定のピュアなベースメッシュ描画設定（タップ無効化版）
     const forestMeshVector = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
         rendererFactory: L.svg.tile,
-        interactive: false, // タップ判定をオフに変更
+        interactive: false,
         minZoom: 15,
         maxNativeZoom: 16,
         vectorTileLayerStyles: normalStylesProxy 
@@ -519,7 +520,7 @@
         }
     });
 
-    // ★絞り込みメッシュもクリック判定をオフ
+    // ★絞り込みメッシュの描画設定（タップ無効化版）
     const searchMesh = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
         rendererFactory: L.canvas.tile, 
         interactive: false, 
@@ -539,7 +540,7 @@
         "傾斜量図（地形把握）": slope,
         "色別標高図": relief,
         "全国林班図（民有：薄緑、国有：濃緑）": rinpan,
-        "全国森林資源メッシュ": forestMeshGroup // メニュー名をシンプルに変更
+        "全国森林資源メッシュ": forestMeshGroup
     };
 
     const overlayMaps = {
@@ -579,7 +580,6 @@
         for (let i = 0; i < categories.length; i++) {
             html += '<i style="background:' + categories[i].color + '"></i> ' + categories[i].label + '<br>';
         }
-        // ★凡例下部の「タップでの詳細表示～」の注釈を削除しました
         html += '</div>';
         
         div.innerHTML = html;
@@ -683,41 +683,41 @@
     }
 
     // ==========================================
-    // 計測ツールのロジック
+    // ★UI洗練版: 計測ツールのロジック（Undo機能搭載）
     // ==========================================
     function toggleMeasure() {
         isMeasuring = !isMeasuring;
         const btn = document.getElementById('btnMeasure');
-        const clrBtn = document.getElementById('btnClearMeasure');
+        const undoBtn = document.getElementById('btnUndoMeasure');
         const resText = document.getElementById('measureResult');
 
         if (isMeasuring) {
+            // 計測開始時に前回の線を自動でクリアする（クリアボタンの統合）
+            clearAllMeasure();
+            
             btn.innerText = "📏 計測終了";
             btn.style.backgroundColor = "#dc3545";
-            clrBtn.style.display = "inline-block";
+            undoBtn.style.display = "inline-block";
             resText.style.display = "inline-block";
             map.getContainer().style.cursor = 'crosshair';
         } else {
+            // 計測終了時は線と結果を残し、カーソルを元に戻す
             btn.innerText = "📏 距離計測";
             btn.style.backgroundColor = "#17a2b8";
+            undoBtn.style.display = "none";
             map.getContainer().style.cursor = '';
-            
-            if (measurePoints.length === 0) {
-                clrBtn.style.display = "none";
-                resText.style.display = "none";
-            }
         }
     }
 
-    function clearMeasure() {
+    // 完全にレイヤーを初期化してリセットする裏方関数
+    function clearAllMeasure() {
         measurePoints = [];
+        measureMarkers = [];
         
-        // レイヤーグループの中身（点と線）をすべて完全に削除
         if (measureLayerGroup) {
             measureLayerGroup.clearLayers(); 
         }
         
-        // 新品の透明な線をグループに追加し直す
         measurePolyline = L.polyline([], {
             color: '#dc3545', 
             weight: 4, 
@@ -726,34 +726,31 @@
             interactive: false
         }).addTo(measureLayerGroup);
         
-        document.getElementById('measureResult').innerText = "総距離: 0 m";
-
-        if (!isMeasuring) {
-            document.getElementById('btnClearMeasure').style.display = "none";
-            document.getElementById('measureResult').style.display = "none";
-        }
+        updateMeasureDisplay();
     }
 
-    function addMeasurePoint(latlng) {
-        if (measurePoints.length > 0) {
-            const lastPt = measurePoints[measurePoints.length - 1];
-            if (lastPt.lat === latlng.lat && lastPt.lng === latlng.lng) {
-                return;
-            }
+    // ★新規追加: 一つ前に戻る（Undo）機能
+    function undoMeasure() {
+        if (measurePoints.length === 0) return;
+        
+        // 座標リストから最後の点を削除
+        measurePoints.pop();
+        
+        // マーカーリストから最後のピンを削除して地図からも消す
+        const lastMarker = measureMarkers.pop();
+        if (lastMarker) {
+            measureLayerGroup.removeLayer(lastMarker);
         }
-
-        measurePoints.push(latlng);
+        
+        // 線を引き直す
         measurePolyline.setLatLngs(measurePoints);
+        
+        // 距離を再計算して表示
+        updateMeasureDisplay();
+    }
 
-        L.circleMarker(latlng, {
-            radius: 5,
-            color: '#dc3545',
-            fillColor: '#ffffff',
-            fillOpacity: 1,
-            weight: 2,
-            interactive: false
-        }).addTo(measureLayerGroup);
-
+    // 距離を計算して画面に表示する裏方関数
+    function updateMeasureDisplay() {
         let totalDistance = 0;
         for (let i = 0; i < measurePoints.length - 1; i++) {
             totalDistance += measurePoints[i].distanceTo(measurePoints[i+1]);
@@ -767,6 +764,32 @@
         }
 
         document.getElementById('measureResult').innerText = "総距離: " + distText;
+    }
+
+    function addMeasurePoint(latlng) {
+        if (measurePoints.length > 0) {
+            const lastPt = measurePoints[measurePoints.length - 1];
+            if (lastPt.lat === latlng.lat && lastPt.lng === latlng.lng) {
+                return;
+            }
+        }
+
+        measurePoints.push(latlng);
+        measurePolyline.setLatLngs(measurePoints);
+
+        const marker = L.circleMarker(latlng, {
+            radius: 5,
+            color: '#dc3545',
+            fillColor: '#ffffff',
+            fillOpacity: 1,
+            weight: 2,
+            interactive: false
+        }).addTo(measureLayerGroup);
+        
+        // Undoできるように打ったピンを記録
+        measureMarkers.push(marker);
+
+        updateMeasureDisplay();
     }
 
     // 地図をクリックした時の処理
