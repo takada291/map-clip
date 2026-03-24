@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.26</title>
+    <title>地図切出 v3.27</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -114,13 +114,11 @@
             box-shadow: 0 0 15px rgba(0,0,0,0.2);
             display: none; 
             cursor: pointer;
-            /* ★スマホ・タブレットでの見切れ防止（高さ制限＆スクロール） */
             max-height: 45vh; 
             max-width: 85vw;
             overflow-y: auto;
             overflow-x: hidden;
         }
-        /* スクロールバーの見た目を少しスッキリさせる（Webkit系） */
         .info.legend::-webkit-scrollbar { width: 6px; }
         .info.legend::-webkit-scrollbar-thumb { background-color: #ccc; border-radius: 3px; }
 
@@ -137,7 +135,6 @@
         
         .leaflet-popup-content { margin: 10px; font-size: 12px; }
 
-        /* ★スケールバーを下部中央に強制配置するCSS */
         .leaflet-bottom .leaflet-control-scale {
             position: absolute;
             bottom: 15px;
@@ -216,6 +213,16 @@
         <option value="竹林">竹林</option>
         <option value="その他">その他</option>
     </select>
+
+    <select id="treeSpeciesSelect" onchange="updateSearch()">
+        <option value="全部" selected>樹種: すべて</option>
+        <option value="スギ">スギ</option>
+        <option value="ヒノキ">ヒノキ類</option>
+        <option value="マツ">マツ類</option>
+        <option value="カラマツ">カラマツ</option>
+        <option value="広葉樹">広葉樹</option>
+        <option value="タケ">タケ</option>
+    </select>
     
     <div class="filter-group">
         <span>林齢:</span>
@@ -252,6 +259,7 @@
     let isJumped = false; 
 
     let currentForestType = "全部";
+    let currentTreeSpecies = "全部"; // ★新規追加: 樹種の現在値
     let currentMinAge = 0;
     let currentMaxAge = 999;
     let searchMarker = null;
@@ -267,8 +275,6 @@
         preferCanvas: true
     }).setView([startLat, startLon], startZoom);
 
-    // ★新規追加: スケールバー（距離目盛り）を画面に追加
-    // メートル法（metric）のみ表示し、インペリアル（マイルなど）は非表示にしています。
     L.control.scale({ imperial: false, metric: true, position: 'bottomleft' }).addTo(map);
 
     delete L.Icon.Default.prototype._getIconUrl;
@@ -412,7 +418,6 @@
 
     const forestMeshGroup = L.layerGroup([forestMeshRaster, forestMeshVector]);
 
-    // SAR衛星の変化抽出レイヤー
     const today = new Date();
     const oneYearAgo = new Date();
     oneYearAgo.setFullYear(today.getFullYear() - 1);
@@ -430,6 +435,7 @@
 
     const customSearchStyle = function(props) {
         let isTargetType = (currentForestType === "全部"); 
+        let isTargetSpecies = (currentTreeSpecies === "全部"); // ★新規追加: 樹種判定フラグ
         let isTargetAge = false;
         let foundAgeData = false;
         
@@ -438,12 +444,21 @@
             let k = key.toString();
             let v = props[key].toString();
             
+            // 林種の判定
             if (currentForestType !== "全部" && k.includes('林種')) {
                 if (v.includes(currentForestType)) {
                     isTargetType = true;
                 }
             }
             
+            // ★新規追加: 樹種の判定（森林簿樹種1をメインターゲットにする）
+            if (currentTreeSpecies !== "全部" && k.includes('樹種1')) {
+                if (v.includes(currentTreeSpecies)) {
+                    isTargetSpecies = true;
+                }
+            }
+            
+            // 林齢の判定
             if (k.includes('林齢')) {
                 foundAgeData = true;
                 let parsedAge = parseInt(v, 10);
@@ -457,7 +472,8 @@
             isTargetAge = true;
         }
 
-        if (isTargetType && isTargetAge) {
+        // 林種、樹種、林齢のすべての条件に合致した場合のみハイライト
+        if (isTargetType && isTargetSpecies && isTargetAge) {
             return {
                 weight: 1.0,
                 color: '#ff4500', 
@@ -628,9 +644,13 @@
         map.setView([lat, lon], 10);
     }
 
+    // ★新規追加: 絞り込み条件の更新
     function updateSearch() {
         const typeSelect = document.getElementById("forestTypeSelect");
         currentForestType = typeSelect.value;
+        
+        const speciesSelect = document.getElementById("treeSpeciesSelect"); // 樹種を取得
+        currentTreeSpecies = speciesSelect.value;
         
         const minInput = document.getElementById("minAge").value;
         currentMinAge = minInput === "" ? 0 : parseInt(minInput, 10);
@@ -677,7 +697,7 @@
         });
         
         if(map.hasLayer(searchMesh)) {
-            activeLayerName = `search_${currentForestType}_${currentMinAge}-${currentMaxAge}_` + activeLayerName;
+            activeLayerName = `search_${currentForestType}_${currentTreeSpecies}_${currentMinAge}-${currentMaxAge}_` + activeLayerName;
         }
 
         const filename = `${activeLayerName}_${south}_${west}_${north}_${east}.jpg`;
