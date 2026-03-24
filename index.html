@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.30</title>
+    <title>地図切出 v3.31</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -678,37 +678,28 @@
         }
     }
 
-    // ★修正版: 天然林から100m以内の人工林を計算する処理
+    // ★v3.31：数学計算で確実にデータを抽出する最強のハック版
     function calculateNaturalUpdateArea() {
         
-        // 1. レイヤーがONになっているかを判定
         let activeMeshLayer = null;
-        let isMeshOn = false;
 
-        // map.eachLayerを使って、現在地図上にあるレイヤーを確実に見つける
-        map.eachLayer(function(layer) {
-            if (layer === searchMesh) {
-                isMeshOn = true;
-                activeMeshLayer = searchMesh;
-            } else if (layer === forestMeshRaster || layer === forestMeshVector) {
-                isMeshOn = true;
-                // ベースマップの場合はVector側のデータを参照する
-                activeMeshLayer = forestMeshVector;
-            }
-        });
+        // レイヤーがオンになっているかを確実にチェック
+        if (map.hasLayer(searchMesh)) {
+            activeMeshLayer = searchMesh;
+        } else if (map.hasLayer(forestMeshRaster) || map.hasLayer(forestMeshGroup) || map.hasLayer(forestMeshVector)) {
+            activeMeshLayer = forestMeshVector;
+        }
 
-        if (!isMeshOn || !activeMeshLayer) {
-            alert("メッシュデータがオンになっていません。\n右上のレイヤー管理（ひし形マーク）から、\n・全国森林資源メッシュ（ベースマップ）\n・🔍 条件絞り込みモード（オーバーレイ）\nのどちらかを選択してください。");
+        if (!activeMeshLayer) {
+            alert("メッシュデータがオンになっていません。\n右上のレイヤー管理（ひし形マーク）から、\n・全国森林資源メッシュ（ベースマップ）\n・🔍 条件絞り込みモード（オーバーレイ）\nのどちらかをオンにしてください。");
             return;
         }
 
-        // 処理負荷を下げるため、ズームレベル14以上でのみ実行を許可
         if (map.getZoom() < 14) {
             alert("処理が重すぎるため、地図をもっと拡大（ズームイン）してから実行してください。");
             return;
         }
 
-        // データが空の場合のエラーハンドリング
         if (!activeMeshLayer._vectorTiles || Object.keys(activeMeshLayer._vectorTiles).length === 0) {
             alert("メッシュの読み込みが完了していないか、データが存在しないエリアです。\n数秒待つか、地図を少し動かして再度お試しください。");
             return;
@@ -724,52 +715,88 @@
             let artificialForests = [];
             let naturalForests = [];
 
-            for (let layerId in activeMeshLayer._vectorTiles) {
-                const tile = activeMeshLayer._vectorTiles[layerId];
-                if(tile && tile._features) {
-                     for(let fId in tile._features){
-                         const feat = tile._features[fId].feature;
-                         if(feat.properties) {
-                             let isArtificial = false;
-                             let isNatural = false;
-                             
-                             for(let k in feat.properties){
-                                 let val = feat.properties[k];
-                                 if(!val) continue;
-                                 val = val.toString();
-                                 if(k.includes('林種')){
-                                     if(val.includes('人工林')) isArtificial = true;
-                                     if(val.includes('天然林')) isNatural = true;
-                                 }
-                             }
-                             
-                             if((isArtificial || isNatural) && tile._features[fId]._latlngs && tile._features[fId]._latlngs.length > 0) {
-                                 let latlngs = tile._features[fId]._latlngs[0];
-                                 if(latlngs && latlngs.length > 0){
-                                     let centerLat = 0, centerLng = 0;
-                                     latlngs.forEach(ll => {
-                                         centerLat += ll.lat;
-                                         centerLng += ll.lng;
-                                     });
-                                     centerLat /= latlngs.length;
-                                     centerLng /= latlngs.length;
-                                     
-                                     let pt = turf.point([centerLng, centerLat], {
-                                         originalProps: feat.properties,
-                                         geometryData: latlngs
-                                     });
-                                     
-                                     if(isArtificial) artificialForests.push(pt);
-                                     if(isNatural) naturalForests.push(pt);
-                                 }
-                             }
-                         }
-                     }
+            // ★タイル座標を緯度経度に変換する数学関数
+            function tile2lng(x, z) { return (x / Math.pow(2, z) * 360 - 180); }
+            function tile2lat(y, z) {
+                let n = Math.PI - 2 * Math.PI * y / Math.pow(2, z);
+                return (180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))));
+            }
+
+            // 現在の地図の表示範囲を取得（画面外のムダな計算を省くため）
+            const currentBounds = map.getBounds();
+
+            // 裏側にある生のPBFデータ（_vectorTiles）を直接こじ開ける
+            for (let tileKey in activeMeshLayer._vectorTiles) {
+                const tile = activeMeshLayer._vectorTiles[tileKey];
+                if (!tile || !tile.layers) continue;
+
+                // tileKey は "x:y:z" の形式
+                let parts = tileKey.split(':');
+                if (parts.length < 3) continue;
+                let tx = parseInt(parts[0]);
+                let ty = parseInt(parts[1]);
+                let tz = parseInt(parts[2]);
+
+                // タイル内のレイヤー（通常は "fr_mesh20m" の1つだけ）を走査
+                for (let lName in tile.layers) {
+                    let vLayer = tile.layers[lName];
+                    let extent = vLayer.extent || 4096; // 内部のピクセル解像度
+
+                    for (let i = 0; i < vLayer.length; i++) {
+                        let feat = vLayer.feature(i);
+                        let props = feat.properties;
+                        
+                        let isArtificial = false;
+                        let isNatural = false;
+                        
+                        for (let k in props) {
+                            if (!props[k]) continue;
+                            let val = props[k].toString();
+                            if (k.includes('林種')) {
+                                if (val.includes('人工林')) isArtificial = true;
+                                if (val.includes('天然林')) isNatural = true;
+                            }
+                        }
+
+                        if (isArtificial || isNatural) {
+                            let geom = feat.loadGeometry(); // [[{x,y}, {x,y}...]]
+                            if (geom && geom.length > 0 && geom[0].length > 0) {
+                                let sumX = 0, sumY = 0, count = 0;
+                                let polygonCoords = [];
+                                
+                                geom[0].forEach(pt => {
+                                    sumX += pt.x;
+                                    sumY += pt.y;
+                                    count++;
+                                    // 内部ピクセル座標を緯度経度に変換
+                                    let lng = tile2lng(tx + pt.x / extent, tz);
+                                    let lat = tile2lat(ty + pt.y / extent, tz);
+                                    polygonCoords.push([lng, lat]);
+                                });
+                                // GeoJSONの仕様に合わせて始点と終点を閉じる
+                                polygonCoords.push(polygonCoords[0]);
+
+                                // メッシュの中心点を計算
+                                let centerLng = tile2lng(tx + (sumX / count) / extent, tz);
+                                let centerLat = tile2lat(ty + (sumY / count) / extent, tz);
+
+                                // 画面に映っている範囲内かチェック
+                                let ptLatLng = L.latLng(centerLat, centerLng);
+                                if (currentBounds.contains(ptLatLng)) {
+                                    let turfPt = turf.point([centerLng, centerLat], {
+                                        geomCoords: polygonCoords
+                                    });
+                                    if (isArtificial) artificialForests.push(turfPt);
+                                    if (isNatural) naturalForests.push(turfPt);
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
             if (artificialForests.length === 0 || naturalForests.length === 0) {
-                alert("画面内に「人工林」と「天然林」の両方が見つかりませんでした。\n天然更新の判定には両方のメッシュが画面に表示されている必要があります。");
+                alert("画面内に「人工林」と「天然林」の両方が見つかりませんでした。\n天然更新の判定には両方のメッシュが画面内に存在している必要があります。");
                 btn.innerText = "🌱 天然更新候補地を検索";
                 btn.disabled = false;
                 return;
@@ -778,15 +805,13 @@
             const naturalCollection = turf.featureCollection(naturalForests);
             let targetPolygons = [];
 
+            // 総当たりで距離を計算
             artificialForests.forEach(af => {
                 const nearest = turf.nearestPoint(af, naturalCollection);
                 const distance = turf.distance(af, nearest, {units: 'kilometers'});
                 
-                if (distance <= 0.1) {
-                    let coords = af.properties.geometryData.map(ll => [ll.lng, ll.lat]);
-                    // 最初と最後の座標を一致させて閉じる
-                    coords.push([af.properties.geometryData[0].lng, af.properties.geometryData[0].lat]);
-                    targetPolygons.push(turf.polygon([coords]));
+                if (distance <= 0.1) { // 100m以内
+                    targetPolygons.push(turf.polygon([af.properties.geomCoords]));
                 }
             });
 
@@ -797,7 +822,7 @@
                 }
                 alert(`${targetPolygons.length}個の天然更新候補（母樹から100m以内の人工林）を発見しました！\n青色の枠線で表示しています。`);
             } else {
-                alert("100m以内に天然林がある人工林は見つかりませんでした。");
+                alert("画面内で、100m以内に天然林がある人工林は見つかりませんでした。");
             }
 
             btn.innerText = "🌱 天然更新候補地を検索";
