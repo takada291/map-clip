@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.34</title>
+    <title>地図切出 v3.35</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -175,7 +175,7 @@
         <option value="37.750,140.467">福島県</option>
         <option value="36.341,140.446">茨城県</option>
         <option value="36.565,139.883">栃木県</option>
-        <option value="36.391,139.060">群馬県</option>
+        <option value="36.391,139.060">群生県</option>
         <option value="35.857,139.648">埼玉県</option>
         <option value="35.605,140.123">千葉県</option>
         <option value="35.689,139.691">東京都</option>
@@ -274,7 +274,7 @@
     const INSTANCE_ID = "c4013cea-2cf9-4011-8915-47a5efb06b75"; 
 
     // ==========================================
-    // 変数の初期化（スコープエラー防止のため上部に配置）
+    // 変数の初期化
     // ==========================================
     let isMeasuring = false;
     let measurePoints = [];
@@ -315,7 +315,8 @@
         color: '#dc3545', 
         weight: 4, 
         dashArray: '8, 8',
-        opacity: 0.8
+        opacity: 0.8,
+        interactive: false // ★修正1: 線がクリックを邪魔しない魔法
     }).addTo(measureLayerGroup);
 
     L.control.scale({ imperial: false, metric: true, position: 'bottomleft' }).addTo(map);
@@ -443,9 +444,8 @@
         vectorTileLayerStyles: normalStylesProxy 
     });
 
-    // ★修正: メッシュをクリックした際の処理
     forestMeshVector.on('click', function(e) {
-        // 計測モード中は、ポップアップを出さずに点を追加する
+        // 計測モード中は点を追加してポップアップを出さない
         if (isMeasuring) {
             addMeasurePoint(e.latlng);
             return;
@@ -720,22 +720,40 @@
         } else {
             btn.innerText = "📏 距離計測";
             btn.style.backgroundColor = "#17a2b8";
-            clrBtn.style.display = "none";
-            resText.style.display = "none";
             map.getContainer().style.cursor = '';
+            
+            // ★修正3: 線が1本もない時だけボタンを隠す
+            if (measurePoints.length === 0) {
+                clrBtn.style.display = "none";
+                resText.style.display = "none";
+            }
         }
     }
 
+    // ★修正2: お化け線を残さないための完全なクリア処理
     function clearMeasure() {
         measurePoints = [];
-        measurePolyline.setLatLngs([]);
-        measureLayerGroup.clearLayers();
-        measureLayerGroup.addLayer(measurePolyline); 
+        measureLayerGroup.clearLayers(); 
+        
+        // 新品の透明な線をグループに追加し直す
+        measurePolyline = L.polyline([], {
+            color: '#dc3545', 
+            weight: 4, 
+            dashArray: '8, 8',
+            opacity: 0.8,
+            interactive: false // ★修正1: クリックの邪魔をしない
+        }).addTo(measureLayerGroup);
+        
         document.getElementById('measureResult').innerText = "総距離: 0 m";
+
+        // 計測オフ状態でクリアを押した場合は、結果とクリアボタンも隠す
+        if (!isMeasuring) {
+            document.getElementById('btnClearMeasure').style.display = "none";
+            document.getElementById('measureResult').style.display = "none";
+        }
     }
 
     function addMeasurePoint(latlng) {
-        // 同じ場所を連続してクリックした場合は無視する（重複バグ防止）
         if (measurePoints.length > 0) {
             const lastPt = measurePoints[measurePoints.length - 1];
             if (lastPt.lat === latlng.lat && lastPt.lng === latlng.lng) {
@@ -751,7 +769,8 @@
             color: '#dc3545',
             fillColor: '#ffffff',
             fillOpacity: 1,
-            weight: 2
+            weight: 2,
+            interactive: false // ★修正1: 点もクリックの邪魔をしない
         }).addTo(measureLayerGroup);
 
         let totalDistance = 0;
@@ -769,7 +788,6 @@
         document.getElementById('measureResult').innerText = "総距離: " + distText;
     }
 
-    // 地図の空白部分をクリックした時
     map.on('click', function(e) {
         if (!isMeasuring) return;
         addMeasurePoint(e.latlng);
