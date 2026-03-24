@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.32</title>
+    <title>地図切出 v3.33</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -34,11 +34,22 @@
         }
         button:hover { background-color: #0056b3; }
 
-        #btnNaturalUpdate {
-            background-color: #28a745;
-        }
-        #btnNaturalUpdate:hover {
-            background-color: #218838;
+        /* ★計測ボタン用のスタイル */
+        #btnMeasure { background-color: #17a2b8; }
+        #btnMeasure:hover { background-color: #138496; }
+        #btnClearMeasure { background-color: #6c757d; display: none; }
+        #btnClearMeasure:hover { background-color: #5a6268; }
+
+        #measureResult {
+            display: none;
+            font-weight: bold;
+            font-size: 13px;
+            color: #d32f2f;
+            background: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            white-space: nowrap;
         }
 
         select {
@@ -245,7 +256,9 @@
     
     <button onclick="downloadMapImageWithExif()">地図を保存</button>
 
-    <button id="btnNaturalUpdate" onclick="calculateNaturalUpdateArea()">🌱 天然更新候補地を検索</button>
+    <button id="btnMeasure" onclick="toggleMeasure()">📏 距離計測</button>
+    <button id="btnClearMeasure" onclick="clearMeasure()">✖ クリア</button>
+    <span id="measureResult">総距離: 0 m</span>
 
     <div id="addressDisplay">📍 情報取得中...</div>
 </div>
@@ -257,7 +270,6 @@
 <script src="https://unpkg.com/leaflet-simple-map-screenshoter"></script>
 <script src="https://unpkg.com/piexifjs@1.0.6/piexif.js"></script>
 <script src="https://unpkg.com/leaflet.vectorgrid@1.3.0/dist/Leaflet.VectorGrid.bundled.js"></script>
-<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
 
 <script>
     const INSTANCE_ID = "c4013cea-2cf9-4011-8915-47a5efb06b75"; 
@@ -414,6 +426,9 @@
     });
 
     forestMeshVector.on('click', function(e) {
+        // ★計測モード中はメッシュ詳細ポップアップを出さない
+        if (isMeasuring) return;
+
         const props = e.layer.properties;
         if (!props) return;
 
@@ -503,26 +518,13 @@
         }
     });
 
-    // ★修正: Canvasモードだとデータが消えるため、SVGモード（データ保持）に変更
     const searchMesh = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
-        rendererFactory: L.svg.tile, // ここを canvas から svg に変更
-        interactive: true,           // ここを false から true に変更
+        rendererFactory: L.canvas.tile, 
+        interactive: false, 
         minZoom: 12, 
         maxNativeZoom: 16,
         vectorTileLayerStyles: searchStylesProxy 
     });
-
-    let naturalUpdateLayer = L.geoJSON(null, {
-        style: function () {
-            return {
-                color: "#00ffff",
-                weight: 2,
-                opacity: 0.8,
-                fillColor: "#00ffff",
-                fillOpacity: 0.3
-            };
-        }
-    }).addTo(map);
 
     photo.addTo(map);
 
@@ -540,8 +542,7 @@
 
     const overlayMaps = {
         "🔍 条件絞り込みモード（上部の設定値でハイライト）": searchMesh,
-        "🚨 SAR衛星 1年間変化抽出（過去と最新の比較）": sarChangeLayer,
-        "🌱 天然更新 候補地（母樹から50m以内の人工林）": naturalUpdateLayer 
+        "🚨 SAR衛星 1年間変化抽出（過去と最新の比較）": sarChangeLayer
     };
 
     L.control.layers(baseMaps, overlayMaps, { collapsed: true }).addTo(map);
@@ -679,123 +680,87 @@
         }
     }
 
-    // ★完全修正版: 描画モードをSVGにして確実にデータを取得＆50m判定
-    function calculateNaturalUpdateArea() {
-        
-        let activeMeshLayer = null;
+    // ==========================================
+    // ★新規追加: 手動のポリライン距離計測ツール
+    // ==========================================
+    let isMeasuring = false;
+    let measurePoints = [];
+    
+    // 計測用の線とピンをまとめるグループ
+    let measureLayerGroup = L.layerGroup().addTo(map);
+    
+    // 計測用の線（破線で目立たせる）
+    let measurePolyline = L.polyline([], {
+        color: '#dc3545', 
+        weight: 4, 
+        dashArray: '8, 8',
+        opacity: 0.8
+    }).addTo(measureLayerGroup);
 
-        if (map.hasLayer(searchMesh)) {
-            activeMeshLayer = searchMesh;
-        } else if (map.hasLayer(forestMeshRaster) || map.hasLayer(forestMeshGroup) || map.hasLayer(forestMeshVector)) {
-            activeMeshLayer = forestMeshVector;
+    function toggleMeasure() {
+        isMeasuring = !isMeasuring;
+        const btn = document.getElementById('btnMeasure');
+        const clrBtn = document.getElementById('btnClearMeasure');
+        const resText = document.getElementById('measureResult');
+
+        if (isMeasuring) {
+            btn.innerText = "📏 計測終了";
+            btn.style.backgroundColor = "#dc3545"; // 赤色でアクティブ感
+            clrBtn.style.display = "inline-block";
+            resText.style.display = "inline-block";
+            map.getContainer().style.cursor = 'crosshair'; // マウスカーソルを十字に
+        } else {
+            btn.innerText = "📏 距離計測";
+            btn.style.backgroundColor = "#17a2b8";
+            clrBtn.style.display = "none";
+            resText.style.display = "none";
+            map.getContainer().style.cursor = '';
+            
+            // 計測終了時に線をクリアするかはお好みですが、今回は残す仕様にしています。
+            // 消したい場合はここで clearMeasure() を呼んでください。
         }
-
-        if (!activeMeshLayer) {
-            alert("メッシュデータがオンになっていません。\n右上のレイヤー管理（ひし形マーク）から、\n・全国森林資源メッシュ（ベースマップ）\n・🔍 条件絞り込みモード（オーバーレイ）\nのどちらかをオンにしてください。");
-            return;
-        }
-
-        if (map.getZoom() < 14) {
-            alert("処理が重すぎるため、地図をもっと拡大（ズームイン）してから実行してください。");
-            return;
-        }
-
-        if (!activeMeshLayer._vectorTiles || Object.keys(activeMeshLayer._vectorTiles).length === 0) {
-            alert("メッシュの読み込みが完了していないか、データが存在しないエリアです。\n数秒待つか、地図を少し動かして再度お試しください。");
-            return;
-        }
-
-        const btn = document.getElementById('btnNaturalUpdate');
-        btn.innerText = "⏳ 計算中...";
-        btn.disabled = true;
-
-        naturalUpdateLayer.clearLayers();
-
-        setTimeout(() => {
-            let artificialForests = [];
-            let naturalForests = [];
-
-            // ★SVG描画されたデータから直接ポリゴンを抽出
-            for (let tileKey in activeMeshLayer._vectorTiles) {
-                const tile = activeMeshLayer._vectorTiles[tileKey];
-                if (!tile || !tile._features) continue;
-
-                for (let fId in tile._features) {
-                    const feat = tile._features[fId].feature;
-                    if (feat && feat.properties) {
-                        let isArtificial = false;
-                        let isNatural = false;
-                        
-                        for (let k in feat.properties) {
-                            if (!feat.properties[k]) continue;
-                            let val = feat.properties[k].toString();
-                            if (k.includes('林種')) {
-                                if (val.includes('人工林')) isArtificial = true;
-                                if (val.includes('天然林')) isNatural = true;
-                            }
-                        }
-
-                        // SVGモードなら _latlngs に実際の緯度経度が保持されている
-                        if ((isArtificial || isNatural) && tile._features[fId]._latlngs && tile._features[fId]._latlngs.length > 0) {
-                            let latlngs = tile._features[fId]._latlngs[0];
-                            if (latlngs && latlngs.length > 0) {
-                                let centerLat = 0, centerLng = 0;
-                                latlngs.forEach(ll => {
-                                    centerLat += ll.lat;
-                                    centerLng += ll.lng;
-                                });
-                                centerLat /= latlngs.length;
-                                centerLng /= latlngs.length;
-                                
-                                let turfPt = turf.point([centerLng, centerLat], {
-                                    geomCoords: latlngs // 描画用にポリゴン座標を保持
-                                });
-                                
-                                if (isArtificial) artificialForests.push(turfPt);
-                                if (isNatural) naturalForests.push(turfPt);
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (artificialForests.length === 0 || naturalForests.length === 0) {
-                alert("画面内に「人工林」と「天然林」の両方が見つかりませんでした。\n（※画面の表示範囲内に天然林が含まれていないと距離計算ができません。少しズームアウトして天然林を画面の端に収めてから再実行してください）");
-                btn.innerText = "🌱 天然更新候補地を検索";
-                btn.disabled = false;
-                return;
-            }
-
-            const naturalCollection = turf.featureCollection(naturalForests);
-            let targetPolygons = [];
-
-            // ★変更: 100m(0.1km) から 50m(0.05km) に引き下げ
-            artificialForests.forEach(af => {
-                const nearest = turf.nearestPoint(af, naturalCollection);
-                const distance = turf.distance(af, nearest, {units: 'kilometers'});
-                
-                if (distance <= 0.05) { 
-                    let coords = af.properties.geomCoords.map(ll => [ll.lng, ll.lat]);
-                    coords.push([af.properties.geomCoords[0].lng, af.properties.geomCoords[0].lat]);
-                    targetPolygons.push(turf.polygon([coords]));
-                }
-            });
-
-            if (targetPolygons.length > 0) {
-                naturalUpdateLayer.addData(turf.featureCollection(targetPolygons));
-                if (!map.hasLayer(naturalUpdateLayer)) {
-                    map.addLayer(naturalUpdateLayer);
-                }
-                alert(`${targetPolygons.length}個の天然更新候補（母樹から50m以内の人工林）を発見しました！\n青色の枠線で表示しています。`);
-            } else {
-                alert("画面内で、50m以内に天然林がある人工林は見つかりませんでした。");
-            }
-
-            btn.innerText = "🌱 天然更新候補地を検索";
-            btn.disabled = false;
-
-        }, 100); 
     }
+
+    function clearMeasure() {
+        measurePoints = [];
+        measurePolyline.setLatLngs([]);
+        measureLayerGroup.clearLayers();
+        measureLayerGroup.addLayer(measurePolyline); // ポリラインは空のまま再登録
+        document.getElementById('measureResult').innerText = "総距離: 0 m";
+    }
+
+    map.on('click', function(e) {
+        if (!isMeasuring) return;
+
+        // クリックした座標をポイントに追加
+        measurePoints.push(e.latlng);
+        measurePolyline.setLatLngs(measurePoints);
+
+        // クリックした場所に小さなマーカー（点）を置く
+        L.circleMarker(e.latlng, {
+            radius: 5,
+            color: '#dc3545',
+            fillColor: '#ffffff',
+            fillOpacity: 1,
+            weight: 2
+        }).addTo(measureLayerGroup);
+
+        // 総距離の計算
+        let totalDistance = 0;
+        for (let i = 0; i < measurePoints.length - 1; i++) {
+            totalDistance += measurePoints[i].distanceTo(measurePoints[i+1]);
+        }
+
+        // 距離のフォーマット（1000m未満は「m」、それ以上は「km」）
+        let distText = "";
+        if (totalDistance < 1000) {
+            distText = Math.round(totalDistance) + " m";
+        } else {
+            distText = (totalDistance / 1000).toFixed(2) + " km";
+        }
+
+        document.getElementById('measureResult').innerText = "総距離: " + distText;
+    });
 
     const snapshotOptions = {
         hideElementsWithSelectors: [
