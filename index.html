@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.33</title>
+    <title>地図切出 v3.34</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -34,7 +34,6 @@
         }
         button:hover { background-color: #0056b3; }
 
-        /* ★計測ボタン用のスタイル */
         #btnMeasure { background-color: #17a2b8; }
         #btnMeasure:hover { background-color: #138496; }
         #btnClearMeasure { background-color: #6c757d; display: none; }
@@ -274,6 +273,14 @@
 <script>
     const INSTANCE_ID = "c4013cea-2cf9-4011-8915-47a5efb06b75"; 
 
+    // ==========================================
+    // 変数の初期化（スコープエラー防止のため上部に配置）
+    // ==========================================
+    let isMeasuring = false;
+    let measurePoints = [];
+    let measureLayerGroup;
+    let measurePolyline;
+
     const urlParams = new URLSearchParams(window.location.search);
     const latParam = urlParams.get('lat');
     const lonParam = urlParams.get('lon');
@@ -299,6 +306,17 @@
     const map = L.map('map', {
         preferCanvas: true
     }).setView([startLat, startLon], startZoom);
+
+    // ==========================================
+    // 計測レイヤーの初期化
+    // ==========================================
+    measureLayerGroup = L.layerGroup().addTo(map);
+    measurePolyline = L.polyline([], {
+        color: '#dc3545', 
+        weight: 4, 
+        dashArray: '8, 8',
+        opacity: 0.8
+    }).addTo(measureLayerGroup);
 
     L.control.scale({ imperial: false, metric: true, position: 'bottomleft' }).addTo(map);
 
@@ -425,9 +443,13 @@
         vectorTileLayerStyles: normalStylesProxy 
     });
 
+    // ★修正: メッシュをクリックした際の処理
     forestMeshVector.on('click', function(e) {
-        // ★計測モード中はメッシュ詳細ポップアップを出さない
-        if (isMeasuring) return;
+        // 計測モード中は、ポップアップを出さずに点を追加する
+        if (isMeasuring) {
+            addMeasurePoint(e.latlng);
+            return;
+        }
 
         const props = e.layer.properties;
         if (!props) return;
@@ -681,22 +703,8 @@
     }
 
     // ==========================================
-    // ★新規追加: 手動のポリライン距離計測ツール
+    // 計測ツールのロジック
     // ==========================================
-    let isMeasuring = false;
-    let measurePoints = [];
-    
-    // 計測用の線とピンをまとめるグループ
-    let measureLayerGroup = L.layerGroup().addTo(map);
-    
-    // 計測用の線（破線で目立たせる）
-    let measurePolyline = L.polyline([], {
-        color: '#dc3545', 
-        weight: 4, 
-        dashArray: '8, 8',
-        opacity: 0.8
-    }).addTo(measureLayerGroup);
-
     function toggleMeasure() {
         isMeasuring = !isMeasuring;
         const btn = document.getElementById('btnMeasure');
@@ -705,19 +713,16 @@
 
         if (isMeasuring) {
             btn.innerText = "📏 計測終了";
-            btn.style.backgroundColor = "#dc3545"; // 赤色でアクティブ感
+            btn.style.backgroundColor = "#dc3545";
             clrBtn.style.display = "inline-block";
             resText.style.display = "inline-block";
-            map.getContainer().style.cursor = 'crosshair'; // マウスカーソルを十字に
+            map.getContainer().style.cursor = 'crosshair';
         } else {
             btn.innerText = "📏 距離計測";
             btn.style.backgroundColor = "#17a2b8";
             clrBtn.style.display = "none";
             resText.style.display = "none";
             map.getContainer().style.cursor = '';
-            
-            // 計測終了時に線をクリアするかはお好みですが、今回は残す仕様にしています。
-            // 消したい場合はここで clearMeasure() を呼んでください。
         }
     }
 
@@ -725,19 +730,23 @@
         measurePoints = [];
         measurePolyline.setLatLngs([]);
         measureLayerGroup.clearLayers();
-        measureLayerGroup.addLayer(measurePolyline); // ポリラインは空のまま再登録
+        measureLayerGroup.addLayer(measurePolyline); 
         document.getElementById('measureResult').innerText = "総距離: 0 m";
     }
 
-    map.on('click', function(e) {
-        if (!isMeasuring) return;
+    function addMeasurePoint(latlng) {
+        // 同じ場所を連続してクリックした場合は無視する（重複バグ防止）
+        if (measurePoints.length > 0) {
+            const lastPt = measurePoints[measurePoints.length - 1];
+            if (lastPt.lat === latlng.lat && lastPt.lng === latlng.lng) {
+                return;
+            }
+        }
 
-        // クリックした座標をポイントに追加
-        measurePoints.push(e.latlng);
+        measurePoints.push(latlng);
         measurePolyline.setLatLngs(measurePoints);
 
-        // クリックした場所に小さなマーカー（点）を置く
-        L.circleMarker(e.latlng, {
+        L.circleMarker(latlng, {
             radius: 5,
             color: '#dc3545',
             fillColor: '#ffffff',
@@ -745,13 +754,11 @@
             weight: 2
         }).addTo(measureLayerGroup);
 
-        // 総距離の計算
         let totalDistance = 0;
         for (let i = 0; i < measurePoints.length - 1; i++) {
             totalDistance += measurePoints[i].distanceTo(measurePoints[i+1]);
         }
 
-        // 距離のフォーマット（1000m未満は「m」、それ以上は「km」）
         let distText = "";
         if (totalDistance < 1000) {
             distText = Math.round(totalDistance) + " m";
@@ -760,6 +767,12 @@
         }
 
         document.getElementById('measureResult').innerText = "総距離: " + distText;
+    }
+
+    // 地図の空白部分をクリックした時
+    map.on('click', function(e) {
+        if (!isMeasuring) return;
+        addMeasurePoint(e.latlng);
     });
 
     const snapshotOptions = {
