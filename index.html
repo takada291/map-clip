@@ -692,7 +692,7 @@
         const resText = document.getElementById('measureResult');
 
         if (isMeasuring) {
-            // 計測開始時に前回の線を自動でクリアする（クリアボタンの統合）
+            // 計測開始時に前回の線を自動でクリアする
             clearAllMeasure();
             
             btn.innerText = "計測終了";
@@ -729,7 +729,7 @@
         updateMeasureDisplay();
     }
 
-    // ★新規追加: 一つ前に戻る（Undo）機能
+    // 一つ前に戻る（Undo）機能
     function undoMeasure() {
         if (measurePoints.length === 0) return;
         
@@ -811,6 +811,7 @@
     };
     const screenshoter = L.simpleMapScreenshoter(snapshotOptions).addTo(map);
 
+    // ★修正: EXIFへの座標埋め込みロジックを確実に復元
     function downloadMapImageWithExif() {
         const bounds = map.getBounds();
         const south = bounds.getSouth().toFixed(6);
@@ -839,15 +840,23 @@
 
         screenshoter.takeScreen('image')
             .then(jpegDataUrl => {
+                // GPSの緯度経度をEXIFに書き込むための文字列を作成
                 const coordsString = `${south},${west},${north},${east}`;
+                
+                // piexifjsを使ってEXIFデータを生成
                 const zeroth = {};
                 const exif = {};
                 const gps = {};
+                // ImageDescription (0x010E) に文字列として保存（林小班図アプリで読み込むため）
                 zeroth[piexif.ImageIFD.ImageDescription] = coordsString;
+                
                 const exifObj = {"0th": zeroth, "Exif": exif, "GPS": gps};
                 const exifBytes = piexif.dump(exifObj);
+                
+                // 画像データにEXIFを挿入
                 const newDataUrl = piexif.insert(exifBytes, jpegDataUrl);
 
+                // ダウンロード処理
                 const link = document.createElement('a');
                 link.download = filename;
                 link.href = newDataUrl;
