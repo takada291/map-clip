@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.40</title>
+    <title>地図切出 v3.41</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -285,12 +285,12 @@
     // 計測用変数の初期化
     // ==========================================
     let isMeasuring = false;
-    let currentMeasureMode = 'distance'; // 'distance' か 'area' を保持する変数
+    let currentMeasureMode = 'distance'; 
     let measurePoints = [];
     let measureMarkers = []; 
     let measureLayerGroup;
-    let measurePolyline; // 距離用の赤い線
-    let measurePolygon;  // 面積用の緑の面
+    let measurePolyline; 
+    let measurePolygon;  
 
     const urlParams = new URLSearchParams(window.location.search);
     const latParam = urlParams.get('lat');
@@ -419,6 +419,13 @@
     const slope = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/slopemap/{z}/{x}/{y}.png', { ...opt, opacity: 0.7 });
     const relief = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/relief/{z}/{x}/{y}.png', { ...opt, opacity: 0.6 });
     const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', optEsri);
+    
+    // ★追加: OpenStreetMap (OSM)
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        maxZoom: 19
+    });
+
     const rinpan = L.tileLayer('https://rinya-tiles.geospatial.jp/fr_layer_webp_2025/{z}/{x}/{y}.webp', {
         attribution: '林野庁 森林計画対象森林レイヤ',
         crossOrigin: "anonymous", 
@@ -440,7 +447,6 @@
         }
     });
     
-    // タップ無効化版（ピュアな状態）
     const forestMeshVector = L.vectorGrid.protobuf('https://rinya-tiles.geospatial.jp/fr_mesh20m_pbf_2025/{z}/{x}/{y}.pbf', {
         rendererFactory: L.svg.tile,
         interactive: false,
@@ -483,7 +489,7 @@
                 }
             }
             
-            if (currentTreeSpecies !== "全部" && k.includes('樹種1')) {
+            if (currentTreeSpecies !== "全部" && k.includes('树種1')) {
                 if (v.includes(currentTreeSpecies)) {
                     isTargetSpecies = true;
                 }
@@ -539,6 +545,7 @@
         "衛星画像（Esri）": esri,
         "標準地図": std,
         "淡色地図": pale,
+        "OpenStreetMap（世界地図）": osm, // ★メニューに追加
         "傾斜量図（地形把握）": slope,
         "色別標高図": relief,
         "全国林班図（民有：薄緑、国有：濃緑）": rinpan,
@@ -684,9 +691,6 @@
         }
     }
 
-    // ==========================================
-    // ★新規追加: モード切り替え（ラジオボタン用）
-    // ==========================================
     function changeMeasureMode() {
         const radios = document.getElementsByName('measureMode');
         for (let i = 0; i < radios.length; i++) {
@@ -696,15 +700,12 @@
             }
         }
         
-        // 計測中にモードを切り替えたら、一旦リセットしてオフにする
         if (isMeasuring) {
             toggleMeasure();
         }
         
-        // 裏側をまっさらに掃除する
         clearAllMeasure();
         
-        // ボタンの文字と、結果表示の初期テキストを切り替える
         const btn = document.getElementById('btnMeasure');
         btn.innerText = (currentMeasureMode === 'distance') ? "距離計測" : "面積計測";
         
@@ -712,9 +713,6 @@
         resText.innerText = (currentMeasureMode === 'distance') ? "総距離: 0 m" : "面積: 0.00 ha";
     }
 
-    // ==========================================
-    // 計測ツールのロジック（距離 ＆ 面積）
-    // ==========================================
     function toggleMeasure() {
         isMeasuring = !isMeasuring;
         const btn = document.getElementById('btnMeasure');
@@ -744,7 +742,6 @@
             measureLayerGroup.clearLayers(); 
         }
         
-        // 距離用の赤い線
         measurePolyline = L.polyline([], {
             color: '#dc3545', 
             weight: 4, 
@@ -753,7 +750,6 @@
             interactive: false
         });
 
-        // 面積用の緑の面（ポリゴン）
         measurePolygon = L.polygon([], {
             color: '#28a745', 
             weight: 4, 
@@ -763,7 +759,6 @@
             interactive: false
         });
 
-        // 現在のモードに合わせて、地図にどちらかをセットする
         if (currentMeasureMode === 'distance') {
             measurePolyline.addTo(measureLayerGroup);
         } else {
@@ -792,10 +787,8 @@
         updateMeasureDisplay();
     }
 
-    // ★数学の公式を使って面積を計算する処理（超軽量）
     function updateMeasureDisplay() {
         if (currentMeasureMode === 'distance') {
-            // 距離計算のロジック
             let totalDistance = 0;
             for (let i = 0; i < measurePoints.length - 1; i++) {
                 totalDistance += measurePoints[i].distanceTo(measurePoints[i+1]);
@@ -810,21 +803,17 @@
             document.getElementById('measureResult').innerText = "総距離: " + distText;
 
         } else {
-            // 面積計算のロジック（球面上での多角形面積の公式）
             let areaSqMeters = 0;
             if (measurePoints.length >= 3) {
                 for (let i = 0; i < measurePoints.length; i++) {
                     let p1 = measurePoints[i];
-                    let p2 = measurePoints[(i + 1) % measurePoints.length]; // 最後の点と最初の点を自動で繋ぐ
-                    // 緯度経度をラジアンに変換して球面過剰の公式を適用
+                    let p2 = measurePoints[(i + 1) % measurePoints.length];
                     areaSqMeters += (p2.lng - p1.lng) * Math.PI / 180 *
                                     (2 + Math.sin(p1.lat * Math.PI / 180) + Math.sin(p2.lat * Math.PI / 180));
                 }
-                // 地球の半径 (6,378,137m) の二乗をかけて平方メートルに戻す
                 areaSqMeters = Math.abs(areaSqMeters * 6378137.0 * 6378137.0 / 2.0);
             }
             
-            // 1ha = 10,000平方メートル なので割る
             let areaHa = areaSqMeters / 10000;
             document.getElementById('measureResult').innerText = "面積: " + areaHa.toFixed(2) + " ha";
         }
@@ -840,14 +829,12 @@
 
         measurePoints.push(latlng);
         
-        // モードに合わせて図形を更新
         if (currentMeasureMode === 'distance') {
             measurePolyline.setLatLngs(measurePoints);
         } else {
             measurePolygon.setLatLngs(measurePoints);
         }
 
-        // 打った点は赤と緑で色を分ける
         const markerColor = (currentMeasureMode === 'distance') ? '#dc3545' : '#28a745';
         
         const marker = L.circleMarker(latlng, {
@@ -898,6 +885,7 @@
             else if(layer === esri) activeLayerName = "satellite";
             else if(layer === pale) activeLayerName = "pale";
             else if(layer === relief) activeLayerName = "relief";
+            else if(layer === osm) activeLayerName = "osm"; // ★追加: OSM時のファイル名対応
             else if(layer === rinpan) activeLayerName = "rinpan";
             else if(layer === forestMeshGroup || layer === forestMeshRaster) activeLayerName = "mesh";
         });
