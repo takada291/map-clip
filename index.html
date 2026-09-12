@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>地図切出 v3.41</title>
+    <title>地図切出 v3.42</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -13,7 +13,7 @@
       function gtag(){dataLayer.push(arguments);}
       gtag('js', new Date());
 
-      // ここも測定IDに書き換えます
+      // 測定ID
       gtag('config', 'G-WXBP6CPKLP');
     </script>
     
@@ -430,7 +430,9 @@
     const relief = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/relief/{z}/{x}/{y}.png', { ...opt, opacity: 0.6 });
     const esri = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', optEsri);
     
-    // ★追加: OpenStreetMap (OSM)
+    // ★新規追加: 陰影起伏図（3D地形把握用）
+    const hillshade = L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/hillshademap/{z}/{x}/{y}.png', { ...opt, opacity: 0.7 });
+    
     const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         maxZoom: 19
@@ -467,11 +469,14 @@
 
     const forestMeshGroup = L.layerGroup([forestMeshRaster, forestMeshVector]);
 
+    // ==========================================
+    // ★修正: SARの変化抽出を「1ヶ月」に変更（大雨被害対応）
+    // ==========================================
     const today = new Date();
-    const oneYearAgo = new Date();
-    oneYearAgo.setFullYear(today.getFullYear() - 1);
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(today.getMonth() - 1); 
     const formatDate = (d) => d.toISOString().split('T')[0];
-    const timeRange = `${formatDate(oneYearAgo)}/${formatDate(today)}`;
+    const timeRange = `${formatDate(oneMonthAgo)}/${formatDate(today)}`;
 
     const sarChangeLayer = L.tileLayer.wms(`https://sh.dataspace.copernicus.eu/ogc/wms/${INSTANCE_ID}`, {
         layers: 'SAR-CHANGE',
@@ -499,7 +504,7 @@
                 }
             }
             
-            if (currentTreeSpecies !== "全部" && k.includes('树種1')) {
+            if (currentTreeSpecies !== "全部" && k.includes('樹種1')) {
                 if (v.includes(currentTreeSpecies)) {
                     isTargetSpecies = true;
                 }
@@ -555,7 +560,8 @@
         "衛星画像（Esri）": esri,
         "標準地図": std,
         "淡色地図": pale,
-        "OpenStreetMap（世界地図）": osm, // ★メニューに追加
+        "OpenStreetMap（世界地図）": osm,
+        "陰影起伏図（3D地形・路網把握）": hillshade, // ★メニューに追加
         "傾斜量図（地形把握）": slope,
         "色別標高図": relief,
         "全国林班図（民有：薄緑、国有：濃緑）": rinpan,
@@ -564,7 +570,7 @@
 
     const overlayMaps = {
         "🔍 条件絞り込みモード（上部の設定値でハイライト）": searchMesh,
-        "🚨 SAR衛星 1年間変化抽出（過去と最新の比較）": sarChangeLayer
+        "🚨 SAR衛星 1ヶ月変化抽出（直近の災害・伐採確認）": sarChangeLayer // ★名前変更
     };
 
     L.control.layers(baseMaps, overlayMaps, { collapsed: true }).addTo(map);
@@ -628,6 +634,7 @@
         }
     });
 
+    // ★修正: 凡例のテキストも「1ヶ月」に変更
     const sarLegend = L.control({position: 'bottomright'});
     sarLegend.onAdd = function (map) {
         const div = L.DomUtil.create('div', 'info legend');
@@ -637,14 +644,14 @@
 
         let html = `
             <div id="sarLegendHeader" style="display: flex; justify-content: space-between; align-items: center;">
-                <h4 style="margin: 0; font-size: 13px; color: #b30000;">🚨 SAR変化抽出</h4>
+                <h4 style="margin: 0; font-size: 13px; color: #b30000;">🚨 SAR変化抽出(1ヶ月)</h4>
                 <span id="sarLegendToggleIcon" style="font-size: 16px; font-weight: bold; color: #007bff; margin-left: 15px;">[+]</span>
             </div>
             <div id="sarLegendContent" style="display: none; margin-top: 8px; padding-top: 8px; border-top: 1px solid #ccc;">
-                <i style="background: rgba(255, 75, 75, 0.8)"></i> 最近に伐採等の可能性有 (赤)<br>
+                <i style="background: rgba(255, 75, 75, 0.8)"></i> 最近に伐採・崩落等の可能性有 (赤)<br>
                 <i style="background: rgba(75, 200, 255, 0.8)"></i> 過去に伐採等の可能性有 (青)<br>
                 <i style="background: rgba(200, 200, 200, 0.8)"></i> 変化なし (白・グレー)<br>
-                <div style="margin-top: 8px; font-size: 10px; color: #666; line-height: 1.2;">※過去1年間の反射強度の変化をRGB合成で可視化</div>
+                <div style="margin-top: 8px; font-size: 10px; color: #666; line-height: 1.2;">※過去1ヶ月間の反射強度の変化をRGB合成で可視化</div>
             </div>
         `;
         div.innerHTML = html;
@@ -895,7 +902,8 @@
             else if(layer === esri) activeLayerName = "satellite";
             else if(layer === pale) activeLayerName = "pale";
             else if(layer === relief) activeLayerName = "relief";
-            else if(layer === osm) activeLayerName = "osm"; // ★追加: OSM時のファイル名対応
+            else if(layer === hillshade) activeLayerName = "hillshade"; // ★追加: 陰影起伏図
+            else if(layer === osm) activeLayerName = "osm"; 
             else if(layer === rinpan) activeLayerName = "rinpan";
             else if(layer === forestMeshGroup || layer === forestMeshRaster) activeLayerName = "mesh";
         });
